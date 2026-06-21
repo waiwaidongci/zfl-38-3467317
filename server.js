@@ -102,6 +102,7 @@ function summarize(item) {
 }
 
 const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
   '.css': 'text/css',
   '.js': 'application/javascript',
   '.json': 'application/json',
