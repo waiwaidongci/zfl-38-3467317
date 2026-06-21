@@ -458,6 +458,11 @@ function page() {
         currentDetailItem = detail;
         timelineFilter = '';
         renderDetailPage();
+        const id = currentDetailItem.id || currentDetailItem.code;
+        const targetUrl = '/items/' + encodeURIComponent(id);
+        if (!handlingPopState && location.pathname !== targetUrl) {
+          history.pushState({}, '', targetUrl);
+        }
       } catch (err) {
         alert('加载详情失败：' + err.message);
         goBack();
@@ -639,6 +644,9 @@ function page() {
 
     function switchView(view) {
       currentView = view;
+      if (!handlingPopState && location.pathname.startsWith('/items/')) {
+        history.pushState({}, '', '/');
+      }
       document.querySelector('#tabList').classList.toggle('active', view === 'list');
       document.querySelector('#tabKanban').classList.toggle('active', view === 'kanban');
       document.querySelector('#tabCalendar').classList.toggle('active', view === 'calendar');
@@ -697,8 +705,46 @@ function page() {
     document.querySelector('#nextMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() + 1); renderCalendar(); };
     document.querySelector('#todayBtn').onclick = () => { viewDate = new Date(); selectedDate = formatDate(new Date()); renderCalendar(); };
 
+    function getDetailIdFromPath() {
+      const m = location.pathname.match(new RegExp('^/items/([^/]+)$'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+
+    let handlingPopState = false;
+
+    window.addEventListener('popstate', () => {
+      handlingPopState = true;
+      const id = getDetailIdFromPath();
+      if (id && currentView !== 'detail') {
+        showDetailView();
+        loadDetail(id).then(() => { handlingPopState = false; });
+        return;
+      } else if (!id && currentView === 'detail') {
+        goBack();
+      }
+      handlingPopState = false;
+    });
+
+    const origGoBack = goBack;
+    goBack = function() {
+      if (!handlingPopState && location.pathname.startsWith('/items/')) {
+        history.pushState({}, '', '/');
+      }
+      origGoBack();
+    };
+
+    async function initFromUrl() {
+      const id = getDetailIdFromPath();
+      if (id) {
+        await itemsPromise;
+        showDetailView();
+        await loadDetail(id);
+      }
+    }
+
     renderForms();
-    load();
+    const itemsPromise = load();
+    initFromUrl();
   </script>
   <script src="/public/kanban.js"></script>
 </body>
@@ -719,6 +765,8 @@ const server = http.createServer(async (req, res) => {
     const db = await loadDb();
 
     if (req.method === "GET" && url.pathname === "/") return html(res, page());
+    const detailPageMatch = url.pathname.match(/^\/items\/([^/]+)$/);
+    if (detailPageMatch && req.method === "GET") return html(res, page(detailPageMatch[1]));
     if (req.method === "GET" && url.pathname === "/import") return html(res, importPage());
     if (req.method === "GET" && url.pathname === "/dashboard") {
       const dashboardPath = join(__dirname, "public", "dashboard.html");
@@ -734,17 +782,20 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
 
-    const itemDetailMatch = url.pathname.match(/^\/api\/items\/([^/]+)$/);
-    if (itemDetailMatch && req.method === "GET") {
-      const detail = getItemWithTimeline(db, itemDetailMatch[1]);
-      if (!detail) return send(res, 404, { error: "item_not_found" });
-      return send(res, 200, detail);
-    }
     if (req.method === "GET" && url.pathname === "/api/items/calendar") {
       const start = url.searchParams.get("start");
       const end = url.searchParams.get("end");
       const filtered = filterByDateRange(db.items, start, end);
       return send(res, 200, filtered.map(summarize));
+    }
+
+    const itemDetailMatch = url.pathname.match(/^\/api\/items\/([^/]+)$/);
+    if (itemDetailMatch && req.method === "GET") {
+      const reserved = ["calendar", "filters", "stats"];
+      if (reserved.includes(itemDetailMatch[1])) return send(res, 404, { error: "not_found" });
+      const detail = getItemWithTimeline(db, itemDetailMatch[1]);
+      if (!detail) return send(res, 404, { error: "item_not_found" });
+      return send(res, 200, detail);
     }
     if (req.method === "POST" && url.pathname === "/api/items") {
       const input = await body(req);
