@@ -1,0 +1,68 @@
+{
+  "logs": [
+    {
+      "id": "LOG-1782054405851-xcvs",
+      "type": "backup_restore",
+      "action": "恢复备份",
+      "detail": "从备份 BK-1782050268649-pzer 恢复数据。恢复前：13 个模型，48 个任务；恢复后：12 个模型，48 个任务。备注：测试备份 - 验收测试",
+      "operator": "review-verification",
+      "at": "2026-06-21T15:06:45.851Z"
+    },
+    {
+      "id": "LOG-1782054405841-wvxf",
+      "type": "backup_download",
+      "action": "下载备份",
+      "detail": "下载备份 BK-1782050268649-pzer",
+      "operator": "system",
+      "at": "2026-06-21T15:06:45.841Z"
+    },
+    {
+      "id": "LOG-1782053733354-r38a",
+      "type": "backup_restore",
+      "action": "恢复备份",
+      "detail": "从备份 BK-1782050268649-pzer 恢复数据。恢复前：13 个模型，48 个任务；恢复后：12 个模型，48 个任务。备注：测试备份 - 验收测试",
+      "operator": "system",
+      "at": "2026-06-21T14:55:33.354Z"
+    },
+    {
+      "id": "LOG-1782053696454-xf9k",
+      "type": "backup_download",
+      "action": "下载备份",
+      "detail": "下载备份 BK-1782050268649-pzer",
+      "operator": "system",
+      "at": "2026-06-21T14:54:56.454Z"
+    },
+    {
+      "id": "LOG-1782053564174-9r6d",
+      "type": "backup_create",
+      "action": "创建备份",
+      "detail": "创建备份 BK-1782053564169-c0bm，包含 12 个模型，48 个任务。备注：测试备份 - 功能验证",
+      "operator": "system",
+      "at": "2026-06-21T14:52:44.174Z"
+    },
+    {
+      "id": "LOG-1782050354518-nal5",
+      "type": "backup_restore",
+      "action": "恢复备份",
+      "detail": "从备份 BK-1782050268649-pzer 恢复数据。恢复前：12 个模型，48 个任务；恢复后：12 个模型，48 个任务。备注：测试备份 - 验收测试",
+      "operator": "system",
+      "at": "2026-06-21T13:59:14.518Z"
+    },
+    {
+      "id": "LOG-1782050340358-96g2",
+      "type": "backup_download",
+      "action": "下载备份",
+      "detail": "下载备份 BK-1782050268649-pzer",
+      "operator": "system",
+      "at": "2026-06-21T13:59:00.358Z"
+    },
+    {
+      "id": "LOG-1782050268652-ex66",
+      "type": "backup_create",
+      "action": "创建备份",
+      "detail": "创建备份 BK-1782050268649-pzer，包含 12 个模型，48 个任务。备注：测试备份 - 验收测试",
+      "operator": "system",
+      "at": "2026-06-21T13:57:48.652Z"
+    }
+  ]
+}

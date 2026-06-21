@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>数据备份与恢复 - 古船模型帆索校准</title>
+  <style>
+    :root { --bg:#f1f3ef; --panel:#fff; --ink:#20241f; --muted:#687066; --line:#d4ddd0; --accent:#526f43; --warn:#9b4937; --calendar-bg:#fafbf9; --calendar-hover:#e6ebe2; --calendar-today:#d6e3cc; --calendar-due:#c4d6b4; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font-family:Arial,"PingFang SC",sans-serif; }
+    header { padding:22px 28px; background:#fff; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:16px; align-items:center; flex-wrap:wrap; }
+    .header-left { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+    .view-tabs { display:flex; gap:4px; background:var(--bg); padding:4px; border-radius:8px; }
+    .view-tabs button { background:transparent; color:var(--muted); padding:6px 14px; border-radius:6px; font-weight:600; border:0; cursor:pointer; }
+    .view-tabs button.active { background:var(--panel); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08); }
+    h1 { margin:0; font-size:26px; } h2 { margin:0 0 12px; font-size:18px; } h3 { margin:0 0 8px; font-size:16px; }
+    main { padding:22px 28px; max-width:1400px; margin:0 auto; }
+    form,.panel,.card,.stat { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
+    label { display:block; margin:10px 0 5px; color:var(--muted); font-size:13px; }
+    input,select,textarea { width:100%; border:1px solid var(--line); border-radius:6px; padding:9px; font:inherit; background:#fff; }
+    textarea { min-height:68px; }
+    button { border:0; border-radius:6px; background:var(--accent); color:#fff; padding:10px 13px; font-weight:700; cursor:pointer; }
+    button.secondary { background:#69736a; }
+    button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+    button.warn { background:var(--warn); }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
+    .stat strong { display:block; font-size:24px; }
+    .meta { color:var(--muted); font-size:13px; }
+    .pill { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:3px 8px; font-size:12px; }
+    .pill.valid { background:#e6ebe2; color:var(--accent); border-color:var(--accent); }
+    .pill.invalid { background:#f5e6e2; color:var(--warn); border-color:var(--warn); }
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; align-items:center; }
+    .toolbar select,.toolbar input { width:auto; min-width:160px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; }
+    .card { display:grid; gap:8px; position:relative; }
+    .card-header { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+    .card-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+    .card-actions button { padding:6px 10px; font-size:13px; }
+    .empty { text-align:center; padding:60px 20px; color:var(--muted); }
+    .empty-icon { font-size:56px; margin-bottom:12px; opacity:.5; }
+    .empty h3 { margin:0 0 8px; color:var(--ink); font-size:18px; }
+    .diff-section { margin-top:20px; }
+    .diff-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:16px; }
+    .diff-item { background:var(--calendar-bg); padding:12px; border-radius:6px; text-align:center; }
+    .diff-item.added { background:#e6ebe2; }
+    .diff-item.removed { background:#f5e6e2; }
+    .diff-item.modified { background:#f7f0db; }
+    .diff-item strong { display:block; font-size:24px; }
+    .diff-item .meta { display:block; margin-top:4px; }
+    .diff-detail { max-height:400px; overflow:auto; border:1px solid var(--line); border-radius:6px; }
+    .diff-detail table { width:100%; border-collapse:collapse; font-size:13px; }
+    .diff-detail th { background:var(--calendar-bg); padding:10px 12px; text-align:left; font-weight:600; border-bottom:2px solid var(--line); position:sticky; top:0; }
+    .diff-detail td { padding:8px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+    .diff-detail tr:hover td { background:var(--calendar-hover); }
+    .diff-detail .row-added { background:rgba(82,111,67,.1); }
+    .diff-detail .row-removed { background:rgba(155,73,55,.1); }
+    .diff-detail .row-modified { background:rgba(139,105,20,.1); }
+    .change-badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+    .change-badge.added { background:#e6ebe2; color:var(--accent); }
+    .change-badge.removed { background:#f5e6e2; color:var(--warn); }
+    .change-badge.modified { background:#f7f0db; color:#8b6914; }
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
+    .modal { background:var(--panel); border-radius:12px; padding:24px; max-width:600px; width:90%; max-height:90vh; overflow:auto; }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+    .modal-footer { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+    .warn-box { background:#fef2f0; border:1px solid var(--warn); border-radius:8px; padding:16px; margin:16px 0; }
+    .warn-box strong { color:var(--warn); }
+    .file-size { color:var(--muted); font-size:12px; }
+    .loading { display:inline-block; width:16px; height:16px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .back-link { color:var(--accent); text-decoration:none; font-weight:600; }
+    .back-link:hover { text-decoration:underline; }
+    @media (max-width:900px){ header{display:block;padding:18px 16px;} main{padding:16px;} }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <div>
+        <h1>📦 数据备份与恢复</h1>
+        <div class="meta">创建校准数据快照，随时从历史版本恢复</div>
+      </div>
+      <div class="view-tabs">
+        <button onclick="location.href='/'">模型列表</button>
+        <button onclick="location.href='/'">任务看板</button>
+        <button onclick="location.href='/'">交付日历</button>
+        <button class="active">备份管理</button>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <button id="createBackupBtn">➕ 创建新备份</button>
+      <button id="refreshBtn" class="secondary">🔄 刷新</button>
+      <button onclick="location.href='/'">← 返回主页面</button>
+    </div>
+  </header>
+
+  <main id="backupMain">
+    <section class="panel" style="margin-bottom:20px;">
+      <div class="toolbar" style="margin-bottom:0; justify-content:space-between;">
+        <div>
+          <h2 style="margin:0;">备份列表</h2>
+          <div class="meta">点击「创建新备份」保存当前数据快照，可从历史备份恢复</div>
+        </div>
+        <div id="statsSummary"></div>
+      </div>
+    </section>
+
+    <section id="backupListSection">
+      <div id="backupGrid" class="grid"></div>
+    </section>
+  </main>
+
+  <div id="createModal" style="display:none;">
+    <div class="modal-overlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 style="margin:0;">创建新备份</h2>
+          <button class="ghost" id="closeCreateModal">✕</button>
+        </div>
+        <form id="createBackupForm">
+          <label>备份备注</label>
+          <textarea id="backupRemark" placeholder="请输入备份备注，便于后续识别（可选）"></textarea>
+          <div class="modal-footer">
+            <button type="button" class="ghost" id="cancelCreateBtn">取消</button>
+            <button type="submit" id="confirmCreateBtn">创建备份</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="diffModal" style="display:none;">
+    <div class="modal-overlay">
+      <div class="modal" style="max-width:900px;">
+        <div class="modal-header">
+          <h2 style="margin:0;">🔍 恢复预览 - 差异对比</h2>
+          <button class="ghost" id="closeDiffModal">✕</button>
+        </div>
+        <div id="diffContent">
+          <div style="text-align:center; padding:40px;"><div class="loading"></div><p class="meta">正在计算差异...</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="restoreModal" style="display:none;">
+    <div class="modal-overlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 style="margin:0;">⚠️ 确认恢复</h2>
+          <button class="ghost" id="closeRestoreModal">✕</button>
+        </div>
+        <div id="restoreContent"></div>
+        <div class="modal-footer">
+          <button class="ghost" id="cancelRestoreBtn">取消</button>
+          <button class="warn" id="confirmRestoreBtn">确认恢复</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/public/backup.js?v=1"></script>
+</body>
+</html>

@@ -12,6 +12,7 @@ import { handleTasksApi } from "./lib/task-api.js";
 import { handleRiskApi } from "./lib/risk-api.js";
 import { handleCalibrationApi } from "./lib/calibration-api.js";
 import { handleOwnerApi } from "./lib/owner-api.js";
+import { handleBackupApi } from "./lib/backup-api.js";
 import {
   loadDb as dalLoadDb,
   saveDb as dalSaveDb,
@@ -306,6 +307,7 @@ function page() {
         <button id="tabDashboard">风险仪表盘</button>
         <button id="tabCalibration">校准库管理</button>
         <button id="tabWorkspace">负责人工作台</button>
+        <button id="tabBackup">备份与恢复</button>
       </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
@@ -998,6 +1000,7 @@ function page() {
     detailBackBtn.onclick = goBack;
     detailAddNoteBtn.onclick = addDetailNote;
     document.querySelector('#tabDashboard').onclick = () => { location.href = '/dashboard'; };
+    document.querySelector('#tabBackup').onclick = () => { location.href = '/backup'; };
     document.querySelector('#prevMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() - 1); renderCalendar(); };
     document.querySelector('#nextMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() + 1); renderCalendar(); };
     document.querySelector('#todayBtn').onclick = () => { viewDate = new Date(); selectedDate = formatDate(new Date()); renderCalendar(); };
@@ -1310,6 +1313,14 @@ const server = http.createServer(async (req, res) => {
       const served = await serveStatic(res, dashboardPath);
       if (served) return;
     }
+    if (req.method === "GET" && url.pathname === "/backup") {
+      const backupPagePath = join(__dirname, "public", "backup.html");
+      const served = await serveStatic(res, backupPagePath);
+      if (served) return;
+    }
+
+    const backupResult = await handleBackupApi(req, res);
+    if (backupResult !== null) return;
     
     const taskResult = await handleTasksApi(req, res, db);
     if (taskResult !== null) return;
