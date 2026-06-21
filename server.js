@@ -11,6 +11,7 @@ import { parseMultipart, extractBoundary } from "./lib/multipart.js";
 import { handleTasksApi } from "./lib/task-api.js";
 import { handleRiskApi } from "./lib/risk-api.js";
 import { handleCalibrationApi } from "./lib/calibration-api.js";
+import { handleOwnerApi } from "./lib/owner-api.js";
 import {
   loadDb as dalLoadDb,
   saveDb as dalSaveDb,
@@ -19,9 +20,16 @@ import {
   updateItem as dalUpdateItem,
   addItemLog as dalAddItemLog,
   createTask as dalCreateTask,
-  getItemWithTimeline,
   TASK_STATUSES
 } from "./lib/data-access.js";
+import {
+  prepareExportData,
+  generateCsvWithBom,
+  getExportColumnLabels,
+  getUniqueOwners,
+  MODEL_STATUSES,
+  formatDate
+} from "./lib/calendar-export.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dbPath = join(__dirname, "data", "model-rigging-calibration.json");
@@ -101,6 +109,47 @@ function filterByDateRange(items, start, end) {
 function summarize(item) {
   const logCount = (item.logs || []).length + (item.tasks || []).reduce((n, t) => n + (t.logs || []).length, 0);
   return { ...item, logCount };
+}
+function getItemWithTimeline(db, id) {
+  const item = db.items.find(x => x.id === id || x.code === id);
+  if (!item) return null;
+  const timeline = [];
+  const timelineTypes = new Set();
+  if (item.logs && item.logs.length > 0) {
+    for (const log of item.logs) {
+      const type = log.step || "记录";
+      timelineTypes.add(type);
+      timeline.push({
+        at: log.at,
+        type: type,
+        note: log.note || "",
+        source: "item"
+      });
+    }
+  }
+  if (item.tasks && item.tasks.length > 0) {
+    for (const task of item.tasks) {
+      if (task.logs && task.logs.length > 0) {
+        for (const log of task.logs) {
+          timelineTypes.add("任务");
+          timeline.push({
+            at: log.at,
+            type: "任务",
+            note: log.note || "",
+            source: "task",
+            taskId: task.id,
+            taskPosition: task.position
+          });
+        }
+      }
+    }
+  }
+  timeline.sort((a, b) => new Date(b.at) - new Date(a.at));
+  return {
+    ...item,
+    timeline: timeline,
+    timelineTypes: [...timelineTypes]
+  };
 }
 
 const MIME_TYPES = {
@@ -218,9 +267,33 @@ function page() {
     .timeline-empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
     .timeline-empty h3 { margin: 0 0 8px; font-size: 16px; color: var(--ink); }
     .timeline-empty p { margin: 0; font-size: 13px; color: var(--muted); }
+    .export-panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:20px; margin-top:20px; }
+    .export-panel-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+    .export-panel-header h2 { margin:0; font-size:18px; }
+    .export-filters { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-bottom:16px; }
+    .export-filter-group label { display:block; margin-bottom:6px; color:var(--muted); font-size:13px; font-weight:600; }
+    .export-filter-group .date-range { display:flex; gap:6px; align-items:center; }
+    .export-filter-group .date-range input { flex:1; min-width:0; }
+    .checkbox-group { display:flex; flex-wrap:wrap; gap:10px; padding:8px; background:var(--calendar-bg); border-radius:6px; max-height:140px; overflow-y:auto; }
+    .checkbox-item { display:flex; align-items:center; gap:5px; cursor:pointer; font-size:13px; padding:3px 8px; border-radius:4px; }
+    .checkbox-item:hover { background:var(--calendar-hover); }
+    .checkbox-item input { width:auto; margin:0; }
+    .export-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+    .export-actions .meta { margin-left:8px; }
+    .export-preview-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .export-preview-table th { background:var(--calendar-bg); padding:10px 12px; text-align:left; font-weight:600; border-bottom:2px solid var(--line); position:sticky; top:0; }
+    .export-preview-table td { padding:8px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+    .export-preview-table tr:hover td { background:var(--calendar-hover); }
+    .export-preview-container { max-height:400px; overflow:auto; border:1px solid var(--line); border-radius:6px; }
+    .export-preview-empty { text-align:center; padding:40px 20px; color:var(--muted); }
+    .export-preview-empty-icon { font-size:40px; margin-bottom:10px; opacity:.5; }
+    .btn-quick { background:var(--calendar-bg); color:var(--ink); border:1px solid var(--line); padding:6px 10px; font-size:12px; font-weight:600; }
+    .btn-quick:hover { background:var(--calendar-hover); }
+    .export-count-pill { display:inline-block; background:var(--accent); color:#fff; padding:3px 10px; border-radius:999px; font-size:13px; font-weight:600; }
     @media (max-width:900px){ header{display:block;padding:18px 16px;} main{grid-template-columns:1fr;padding:16px;} .calendar-cell{min-height:70px;padding:4px;} }
   </style>
   <link rel="stylesheet" href="/public/kanban.css">
+  <link rel="stylesheet" href="/public/workspace.css">
 </head>
 <body>
   <header>
@@ -232,6 +305,7 @@ function page() {
         <button id="tabCalendar">交付日历</button>
         <button id="tabDashboard">风险仪表盘</button>
         <button id="tabCalibration">校准库管理</button>
+        <button id="tabWorkspace">负责人工作台</button>
       </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
@@ -260,11 +334,49 @@ function page() {
             <button class="ghost" id="prevMonth">← 上月</button>
             <button class="ghost" id="todayBtn">今天</button>
             <button class="ghost" id="nextMonth">下月 →</button>
+            <button id="toggleExportBtn" class="import-btn">📤 导出</button>
           </div>
         </div>
         <div class="calendar-grid" id="calendarGrid"></div>
       </div>
       <div class="calendar-detail" id="calendarDetail"></div>
+      <div class="export-panel" id="exportPanel" style="display:none">
+        <div class="export-panel-header">
+          <h2>📤 导出交付日历</h2>
+          <button class="ghost" id="closeExportBtn">收起</button>
+        </div>
+        <div class="export-filters">
+          <div class="export-filter-group">
+            <label>交付日期范围</label>
+            <div class="date-range">
+              <input type="date" id="exportStartDate" placeholder="开始日期">
+              <span style="color:var(--muted)">至</span>
+              <input type="date" id="exportEndDate" placeholder="结束日期">
+            </div>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <button type="button" class="btn-quick" data-range="thisWeek">本周</button>
+              <button type="button" class="btn-quick" data-range="nextWeek">下周</button>
+              <button type="button" class="btn-quick" data-range="thisMonth">本月</button>
+              <button type="button" class="btn-quick" data-range="nextMonth">下月</button>
+              <button type="button" class="btn-quick" id="clearDateRangeBtn">清除</button>
+            </div>
+          </div>
+          <div class="export-filter-group">
+            <label>状态筛选</label>
+            <div class="checkbox-group" id="exportStatusGroup"></div>
+          </div>
+          <div class="export-filter-group">
+            <label>负责人筛选</label>
+            <div class="checkbox-group" id="exportOwnerGroup"></div>
+          </div>
+        </div>
+        <div class="export-actions">
+          <button id="exportPreviewBtn">🔍 预览导出</button>
+          <button id="exportDownloadBtn" class="secondary" disabled>⬇️ 下载 CSV</button>
+          <span id="exportResultCount" class="meta" style="display:none"></span>
+        </div>
+        <div id="exportPreviewContainer"></div>
+      </div>
     </section>
     <section id="kanbanSection" style="display:none">
       <div class="kanban-view">
@@ -325,6 +437,14 @@ function page() {
         <div class="grid" id="calibrationRules"></div>
       </div>
     </section>
+    <section id="workspaceSection" style="display:none">
+      <div class="ws-section-header" style="margin-bottom:14px">
+        <h2 style="margin:0">负责人工作台</h2>
+        <div class="meta">按负责人聚合展示名下模型、待处理帆索任务、近期待交付模型和最近校准记录</div>
+      </div>
+      <div id="wsOwnerList" class="ws-owners-grid"></div>
+      <div id="wsWorkspace" style="display:none"></div>
+    </section>
   </main>
   <script>
     const fields = [["code","模型编号","text"],["shipType","船型","text"],["scale","比例","text"],["mastCount","桅杆数量","number"],["riggingMaterial","帆索材料","text"],["owner","负责人","text"],["dueDate","交付日期","date"]];
@@ -362,6 +482,8 @@ function page() {
     let currentDetailItem = null;
     let timelineFilter = '';
     let editingCalibrationRule = null;
+    let exportFilters = { statuses: [], owners: [], startDate: '', endDate: '' };
+    let exportPreviewData = null;
 
     async function api(path, options) {
       const res = await fetch(path, options && options.body ? { ...options, headers:{ 'Content-Type':'application/json' } } : options);
@@ -563,11 +685,14 @@ function page() {
       document.querySelector('#listSectionRight').style.display = 'none';
       document.querySelector('#calendarSection').style.display = 'none';
       document.querySelector('#kanbanSection').style.display = 'none';
+      document.querySelector('#workspaceSection').style.display = 'none';
       detailSection.style.display = '';
       document.querySelector('#main').classList.add('detail-view');
       document.querySelector('#tabList').classList.remove('active');
       document.querySelector('#tabKanban').classList.remove('active');
       document.querySelector('#tabCalendar').classList.remove('active');
+      document.querySelector('#tabCalibration').classList.remove('active');
+      document.querySelector('#tabWorkspace').classList.remove('active');
     }
 
     function goBack() {
@@ -575,6 +700,8 @@ function page() {
         switchView('calendar');
       } else if (previousView === 'kanban') {
         switchView('kanban');
+      } else if (previousView === 'workspace') {
+        switchView('workspace');
       } else {
         switchView('list');
       }
@@ -729,11 +856,13 @@ function page() {
       document.querySelector('#tabKanban').classList.toggle('active', view === 'kanban');
       document.querySelector('#tabCalendar').classList.toggle('active', view === 'calendar');
       document.querySelector('#tabCalibration').classList.toggle('active', view === 'calibration');
+      document.querySelector('#tabWorkspace').classList.toggle('active', view === 'workspace');
       document.querySelector('#listSection').style.display = view === 'list' ? '' : 'none';
       document.querySelector('#listSectionRight').style.display = view === 'list' ? '' : 'none';
       document.querySelector('#calendarSection').style.display = view === 'calendar' ? '' : 'none';
       document.querySelector('#kanbanSection').style.display = view === 'kanban' ? '' : 'none';
       calibrationSection.style.display = view === 'calibration' ? '' : 'none';
+      document.querySelector('#workspaceSection').style.display = view === 'workspace' ? '' : 'none';
       detailSection.style.display = 'none';
       document.querySelector('#main').classList.remove('detail-view');
       document.querySelector('#main').classList.toggle('calendar-view', view === 'calendar');
@@ -746,6 +875,10 @@ function page() {
         }
       } else if (view === 'calibration') {
         loadCalibrationRules();
+      } else if (view === 'workspace') {
+        if (window.initWorkspace) {
+          initWorkspace(window._wsIsInitializing && window._wsIsInitializing());
+        }
       } else {
         renderList();
       }
@@ -756,6 +889,7 @@ function page() {
       else if (currentView === 'calendar') renderCalendar();
       else if (currentView === 'kanban' && window.refreshKanban) refreshKanban();
       else if (currentView === 'calibration') renderCalibrationRules();
+      else if (currentView === 'workspace' && window.refreshWorkspace) refreshWorkspace();
     }
 
     async function loadCalibrationRules() {
@@ -839,6 +973,8 @@ function page() {
       items = await api('/api/items');
       if (currentView === 'kanban' && window.refreshKanban) {
         await refreshKanban();
+      } else if (currentView === 'workspace' && window.refreshWorkspace) {
+        await refreshWorkspace();
       } else {
         render();
       }
@@ -854,6 +990,7 @@ function page() {
     document.querySelector('#tabKanban').onclick = () => switchView('kanban');
     document.querySelector('#tabCalendar').onclick = () => switchView('calendar');
     document.querySelector('#tabCalibration').onclick = () => switchView('calibration');
+    document.querySelector('#tabWorkspace').onclick = () => switchView('workspace');
     calAddBtn.onclick = () => openCalibrationForm();
     calMaterialFilter.onchange = loadCalibrationRules;
     calScaleFilter.onchange = loadCalibrationRules;
@@ -865,8 +1002,224 @@ function page() {
     document.querySelector('#nextMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() + 1); renderCalendar(); };
     document.querySelector('#todayBtn').onclick = () => { viewDate = new Date(); selectedDate = formatDate(new Date()); renderCalendar(); };
 
+    document.querySelector('#toggleExportBtn').onclick = () => {
+      const panel = document.querySelector('#exportPanel');
+      if (panel.style.display === 'none') {
+        panel.style.display = '';
+        initExportPanel();
+      } else {
+        panel.style.display = 'none';
+      }
+    };
+    document.querySelector('#closeExportBtn').onclick = () => {
+      document.querySelector('#exportPanel').style.display = 'none';
+    };
+
+    function getWeekRange(date) {
+      const d = new Date(date);
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      const start = new Date(d);
+      start.setDate(diff);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    }
+
+    function formatExportDate(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + day;
+    }
+
+    async function initExportPanel() {
+      try {
+        const filters = await api('/api/calendar/export/filters');
+        renderExportCheckboxes('exportStatusGroup', filters.statuses, 'statuses');
+        renderExportCheckboxes('exportOwnerGroup', filters.owners, 'owners');
+      } catch (e) {
+        console.error('加载导出筛选条件失败:', e);
+      }
+      document.querySelectorAll('[data-range]').forEach(btn => {
+        btn.onclick = () => setQuickDateRange(btn.dataset.range);
+      });
+      document.querySelector('#clearDateRangeBtn').onclick = () => {
+        document.querySelector('#exportStartDate').value = '';
+        document.querySelector('#exportEndDate').value = '';
+        exportFilters.startDate = '';
+        exportFilters.endDate = '';
+      };
+      document.querySelector('#exportStartDate').onchange = (e) => { exportFilters.startDate = e.target.value; };
+      document.querySelector('#exportEndDate').onchange = (e) => { exportFilters.endDate = e.target.value; };
+      document.querySelector('#exportPreviewBtn').onclick = runExportPreview;
+      document.querySelector('#exportDownloadBtn').onclick = downloadExportCsv;
+    }
+
+    function setQuickDateRange(range) {
+      const now = new Date();
+      let start, end;
+      if (range === 'thisWeek') {
+        const r = getWeekRange(now);
+        start = r.start; end = r.end;
+      } else if (range === 'nextWeek') {
+        const next = new Date(now);
+        next.setDate(next.getDate() + 7);
+        const r = getWeekRange(next);
+        start = r.start; end = r.end;
+      } else if (range === 'thisMonth') {
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      } else if (range === 'nextMonth') {
+        start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        end = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+      }
+      const startStr = formatExportDate(start);
+      const endStr = formatExportDate(end);
+      document.querySelector('#exportStartDate').value = startStr;
+      document.querySelector('#exportEndDate').value = endStr;
+      exportFilters.startDate = startStr;
+      exportFilters.endDate = endStr;
+    }
+
+    function renderExportCheckboxes(containerId, options, filterKey) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (options.length === 0) {
+        container.innerHTML = '<span class="meta">暂无选项</span>';
+        return;
+      }
+      container.innerHTML = options.map(opt => {
+        const label = opt === '' ? '（未分配）' : opt;
+        const checked = exportFilters[filterKey].includes(opt);
+        return '<label class="checkbox-item"><input type="checkbox" data-filter-key="' + filterKey + '" value="' + (opt === '' ? '__empty__' : opt) + '" ' + (checked ? 'checked' : '') + '>' + label + '</label>';
+      }).join('');
+      container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.onchange = () => {
+          const key = cb.dataset.filterKey;
+          const val = cb.value === '__empty__' ? '' : cb.value;
+          if (cb.checked) {
+            if (!exportFilters[key].includes(val)) exportFilters[key].push(val);
+          } else {
+            exportFilters[key] = exportFilters[key].filter(v => v !== val);
+          }
+          exportPreviewData = null;
+          document.querySelector('#exportDownloadBtn').disabled = true;
+        };
+      });
+    }
+
+    async function runExportPreview() {
+      const btn = document.querySelector('#exportPreviewBtn');
+      const dlBtn = document.querySelector('#exportDownloadBtn');
+      const countEl = document.querySelector('#exportResultCount');
+      btn.disabled = true;
+      btn.textContent = '加载中...';
+      try {
+        const requestFilters = {
+          startDate: exportFilters.startDate || undefined,
+          endDate: exportFilters.endDate || undefined,
+          statuses: exportFilters.statuses,
+          owners: exportFilters.owners
+        };
+        const result = await api('/api/calendar/export/preview', {
+          method: 'POST',
+          body: JSON.stringify(requestFilters)
+        });
+        exportPreviewData = { ...result, filters: requestFilters };
+        renderExportPreview(result);
+        countEl.style.display = '';
+        countEl.innerHTML = '共 <span class="export-count-pill">' + result.total + '</span> 条记录';
+        if (result.total > 0) {
+          dlBtn.disabled = false;
+        } else {
+          dlBtn.disabled = true;
+        }
+      } catch (e) {
+        alert('预览失败：' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🔍 预览导出';
+      }
+    }
+
+    function renderExportPreview(result) {
+      const container = document.querySelector('#exportPreviewContainer');
+      if (!result || result.total === 0) {
+        container.innerHTML = '<div class="export-preview-empty"><div class="export-preview-empty-icon">📭</div><h3 style="margin:0 0 6px">暂无符合条件的数据</h3><div class="meta">请调整筛选条件后再次预览</div></div>';
+        return;
+      }
+      let html = '<div class="export-preview-container"><table class="export-preview-table"><thead><tr>';
+      for (const col of result.columns) {
+        html += '<th>' + col.label + '</th>';
+      }
+      html += '</tr></thead><tbody>';
+      for (const row of result.rows) {
+        html += '<tr>';
+        for (const col of result.columns) {
+          const val = row[col.key] !== undefined && row[col.key] !== null ? String(row[col.key]) : '';
+          html += '<td>' + (val === '' ? '<span class="meta">—</span>' : val) + '</td>';
+        }
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+      container.innerHTML = html;
+    }
+
+    async function downloadExportCsv() {
+      if (!exportPreviewData || exportPreviewData.total === 0) {
+        alert('没有可导出的数据，请先预览');
+        return;
+      }
+      try {
+        const requestFilters = {
+          startDate: exportFilters.startDate || undefined,
+          endDate: exportFilters.endDate || undefined,
+          statuses: exportFilters.statuses,
+          owners: exportFilters.owners
+        };
+        if (JSON.stringify(requestFilters) !== JSON.stringify(exportPreviewData.filters || {})) {
+          alert('筛选条件已变化，请重新预览后再下载');
+          return;
+        }
+        const res = await fetch('/api/calendar/export/csv', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestFilters)
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || '下载失败');
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        let filename = '交付日历.csv';
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match) {
+          filename = decodeURIComponent(match[1]);
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        alert('下载失败：' + e.message);
+      }
+    }
+
     function getDetailIdFromPath() {
       const m = location.pathname.match(new RegExp('^/items/([^/]+)$'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+
+    function getWorkspaceOwnerFromPath() {
+      const m = location.pathname.match(new RegExp('^/workspace/([^/]+)$'));
       return m ? decodeURIComponent(m[1]) : null;
     }
 
@@ -875,19 +1228,31 @@ function page() {
     window.addEventListener('popstate', () => {
       handlingPopState = true;
       const id = getDetailIdFromPath();
+      const owner = getWorkspaceOwnerFromPath();
       if (id && currentView !== 'detail') {
         showDetailView();
         loadDetail(id).then(() => { handlingPopState = false; });
         return;
-      } else if (!id && currentView === 'detail') {
+      } else if (owner && currentView !== 'detail') {
+        switchView('workspace');
+        if (window.wsShowWorkspace) {
+          window.wsShowWorkspace(owner);
+        }
+        handlingPopState = false;
+        return;
+      } else if (!id && !owner && currentView === 'detail') {
         goBack();
+      } else if (!id && !owner && window._wsGetCurrentWorkspace && window._wsGetCurrentWorkspace()) {
+        if (window.wsShowOwnerList) {
+          window.wsShowOwnerList();
+        }
       }
       handlingPopState = false;
     });
 
     const origGoBack = goBack;
     goBack = function() {
-      if (!handlingPopState && location.pathname.startsWith('/items/')) {
+      if (!handlingPopState && (location.pathname.startsWith('/items/') || location.pathname.startsWith('/workspace/'))) {
         history.pushState({}, '', '/');
       }
       origGoBack();
@@ -895,10 +1260,19 @@ function page() {
 
     async function initFromUrl() {
       const id = getDetailIdFromPath();
+      const owner = getWorkspaceOwnerFromPath();
       if (id) {
         await itemsPromise;
         showDetailView();
         await loadDetail(id);
+      } else if (owner) {
+        await itemsPromise;
+        if (window._wsSetInitializing) window._wsSetInitializing(true);
+        switchView('workspace');
+        if (window.wsShowWorkspace) {
+          window.wsShowWorkspace(owner);
+        }
+        if (window._wsSetInitializing) window._wsSetInitializing(false);
       }
     }
 
@@ -906,7 +1280,8 @@ function page() {
     const itemsPromise = load();
     initFromUrl();
   </script>
-  <script src="/public/kanban.js"></script>
+  <script src="/public/kanban.js?v=4"></script>
+  <script src="/public/workspace.js?v=4"></script>
 </body>
 </html>`;
 }
@@ -927,6 +1302,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/") return html(res, page());
     const detailPageMatch = url.pathname.match(/^\/items\/([^/]+)$/);
     if (detailPageMatch && req.method === "GET") return html(res, page(detailPageMatch[1]));
+    const workspacePageMatch = url.pathname.match(/^\/workspace\/([^/]+)$/);
+    if (workspacePageMatch && req.method === "GET") return html(res, page());
     if (req.method === "GET" && url.pathname === "/import") return html(res, importPage());
     if (req.method === "GET" && url.pathname === "/dashboard") {
       const dashboardPath = join(__dirname, "public", "dashboard.html");
@@ -942,6 +1319,9 @@ const server = http.createServer(async (req, res) => {
 
     const calibrationResult = await handleCalibrationApi(req, res);
     if (calibrationResult !== null) return;
+
+    const ownerResult = await handleOwnerApi(req, res, db);
+    if (ownerResult !== null) return;
 
     if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
 
@@ -1002,6 +1382,52 @@ const server = http.createServer(async (req, res) => {
       return send(res, 201, item);
     }
     if (req.method === "GET" && url.pathname === "/api/stats") return send(res, 200, computeStats(db.items));
+
+    if (req.method === "GET" && url.pathname === "/api/calendar/export/filters") {
+      const owners = getUniqueOwners(db.items);
+      return send(res, 200, {
+        statuses: MODEL_STATUSES,
+        owners: owners
+      });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/calendar/export/preview") {
+      const input = await body(req);
+      const rows = prepareExportData(db.items, {
+        startDate: input.startDate,
+        endDate: input.endDate,
+        statuses: input.statuses || [],
+        owners: input.owners || []
+      });
+      return send(res, 200, {
+        columns: getExportColumnLabels(),
+        rows: rows,
+        total: rows.length
+      });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/calendar/export/csv") {
+      const input = await body(req);
+      const rows = prepareExportData(db.items, {
+        startDate: input.startDate,
+        endDate: input.endDate,
+        statuses: input.statuses || [],
+        owners: input.owners || []
+      });
+      if (rows.length === 0) {
+        return send(res, 409, { error: "empty_export", message: "没有符合条件的交付记录，请调整筛选条件后再导出" });
+      }
+      const csvContent = generateCsvWithBom(rows);
+      const now = new Date();
+      const filename = "交付日历_" + formatDate(now) + "_" + String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0") + ".csv";
+      res.writeHead(200, {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="' + encodeURIComponent(filename) + '"',
+        "Content-Length": Buffer.byteLength(csvContent, "utf8")
+      });
+      res.end(csvContent, "utf8");
+      return;
+    }
 
     if (req.method === "POST" && url.pathname === "/api/import/preview") {
       const contentType = req.headers["content-type"] || "";
