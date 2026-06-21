@@ -1,13 +1,24 @@
 import http from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { dirname, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseBuffer, generateTaskSummary } from "./lib/upload-parser.js";
 import { validateAll } from "./lib/data-validator.js";
 import { commitImport } from "./lib/data-writer.js";
 import { importPage } from "./lib/pages.js";
 import { parseMultipart, extractBoundary } from "./lib/multipart.js";
+import { handleTasksApi } from "./lib/task-api.js";
+import {
+  loadDb as dalLoadDb,
+  saveDb as dalSaveDb,
+  getAllItems,
+  createItem as dalCreateItem,
+  updateItem as dalUpdateItem,
+  addItemLog as dalAddItemLog,
+  createTask as dalCreateTask,
+  TASK_STATUSES
+} from "./lib/data-access.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dbPath = join(__dirname, "data", "model-rigging-calibration.json");
@@ -88,6 +99,33 @@ function summarize(item) {
   const logCount = (item.logs || []).length + (item.tasks || []).reduce((n, t) => n + (t.logs || []).length, 0);
   return { ...item, logCount };
 }
+
+const MIME_TYPES = {
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon'
+};
+
+async function serveStatic(res, filePath) {
+  try {
+    if (!existsSync(filePath) || !statSync(filePath).isFile()) {
+      return false;
+    }
+    const ext = extname(filePath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    const content = await readFile(filePath);
+    res.writeHead(200, { 'Content-Type': contentType });
+    res.end(content);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 function page() {
   return `<!doctype html>
 <html lang="zh-CN">
@@ -142,8 +180,10 @@ function page() {
     .due-tag { display:inline-block; background:var(--calendar-due); color:var(--accent); padding:2px 8px; border-radius:4px; font-size:12px; font-weight:600; margin-left:6px; }
     .card .due-highlight { color:var(--warn); font-weight:700; }
     .import-btn { background:#2d5a8e; }
+    main.kanban-view { grid-template-columns: 1fr; }
     @media (max-width:900px){ header{display:block;padding:18px 16px;} main{grid-template-columns:1fr;padding:16px;} .calendar-cell{min-height:70px;padding:4px;} }
   </style>
+  <link rel="stylesheet" href="/public/kanban.css">
 </head>
 <body>
   <header>
@@ -151,6 +191,7 @@ function page() {
       <div><h1>古船模型帆索校准</h1><div class="meta">模型、帆索任务和校准记录串联</div></div>
       <div class="view-tabs">
         <button id="tabList" class="active">模型列表</button>
+        <button id="tabKanban">任务看板</button>
         <button id="tabCalendar">交付日历</button>
       </div>
     </div>
@@ -185,6 +226,31 @@ function page() {
         <div class="calendar-grid" id="calendarGrid"></div>
       </div>
       <div class="calendar-detail" id="calendarDetail"></div>
+    </section>
+    <section id="kanbanSection" style="display:none">
+      <div class="kanban-view">
+        <div class="kanban-stats" id="kanbanStats"></div>
+        <div class="kanban-toolbar">
+          <label>模型
+            <select id="kanbanModelFilter"><option value="">全部模型</option></select>
+          </label>
+          <label>负责人
+            <select id="kanbanOwnerFilter"><option value="">全部负责人</option></select>
+          </label>
+          <label>松紧状态
+            <select id="kanbanTensionFilter"><option value="">全部松紧</option></select>
+          </label>
+          <label class="date-range">交付日期
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input type="date" id="kanbanDueStart" placeholder="开始">
+              <span style="color:var(--muted)">至</span>
+              <input type="date" id="kanbanDueEnd" placeholder="结束">
+            </div>
+          </label>
+          <button class="btn-clear" id="kanbanClearFilters">清除筛选</button>
+        </div>
+        <div class="kanban-board" id="kanbanBoard"></div>
+      </div>
     </section>
   </main>
   <script>
@@ -363,18 +429,29 @@ function page() {
     function switchView(view) {
       currentView = view;
       document.querySelector('#tabList').classList.toggle('active', view === 'list');
+      document.querySelector('#tabKanban').classList.toggle('active', view === 'kanban');
       document.querySelector('#tabCalendar').classList.toggle('active', view === 'calendar');
       document.querySelector('#listSection').style.display = view === 'list' ? '' : 'none';
       document.querySelector('#listSectionRight').style.display = view === 'list' ? '' : 'none';
       document.querySelector('#calendarSection').style.display = view === 'calendar' ? '' : 'none';
+      document.querySelector('#kanbanSection').style.display = view === 'kanban' ? '' : 'none';
       document.querySelector('#main').classList.toggle('calendar-view', view === 'calendar');
-      if (view === 'calendar') renderCalendar();
-      else renderList();
+      document.querySelector('#main').classList.toggle('kanban-view', view === 'kanban');
+      if (view === 'calendar') {
+        renderCalendar();
+      } else if (view === 'kanban') {
+        if (window.initKanban) {
+          initKanban();
+        }
+      } else {
+        renderList();
+      }
     }
 
     function render() {
       if (currentView === 'list') renderList();
-      else renderCalendar();
+      else if (currentView === 'calendar') renderCalendar();
+      else if (currentView === 'kanban' && window.refreshKanban) refreshKanban();
     }
 
     async function load() {
@@ -382,13 +459,23 @@ function page() {
       render();
     }
 
-    createForm.onsubmit = async event => { event.preventDefault(); await api('/api/items', { method:'POST', body: JSON.stringify(Object.fromEntries(new FormData(createForm).entries())) }); createForm.reset(); await load(); };
-    actionForm.onsubmit = async event => { event.preventDefault(); await api('/api/items/'+itemSelect.value+'/action', { method:'POST', body: JSON.stringify(Object.fromEntries(new FormData(actionForm).entries())) }); actionForm.reset(); await load(); };
+    async function refreshAll() {
+      items = await api('/api/items');
+      if (currentView === 'kanban' && window.refreshKanban) {
+        await refreshKanban();
+      } else {
+        render();
+      }
+    }
+
+    createForm.onsubmit = async event => { event.preventDefault(); await api('/api/items', { method:'POST', body: JSON.stringify(Object.fromEntries(new FormData(createForm).entries())) }); createForm.reset(); await refreshAll(); };
+    actionForm.onsubmit = async event => { event.preventDefault(); await api('/api/items/'+itemSelect.value+'/action', { method:'POST', body: JSON.stringify(Object.fromEntries(new FormData(actionForm).entries())) }); actionForm.reset(); await refreshAll(); };
     document.querySelector('#statusFilter').onchange = render;
     document.querySelector('#search').oninput = render;
-    document.querySelector('#reload').onclick = load;
+    document.querySelector('#reload').onclick = refreshAll;
     document.querySelector('#importBtn').onclick = () => { location.href = '/import'; };
     document.querySelector('#tabList').onclick = () => switchView('list');
+    document.querySelector('#tabKanban').onclick = () => switchView('kanban');
     document.querySelector('#tabCalendar').onclick = () => switchView('calendar');
     document.querySelector('#prevMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() - 1); renderCalendar(); };
     document.querySelector('#nextMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() + 1); renderCalendar(); };
@@ -397,6 +484,7 @@ function page() {
     renderForms();
     load();
   </script>
+  <script src="/public/kanban.js"></script>
 </body>
 </html>`;
 }
@@ -404,10 +492,21 @@ function page() {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    
+    if (url.pathname.startsWith('/public/')) {
+      const publicPath = join(__dirname, 'public');
+      const filePath = join(publicPath, url.pathname.slice('/public/'.length));
+      const served = await serveStatic(res, filePath);
+      if (served) return;
+    }
+    
     const db = await loadDb();
 
     if (req.method === "GET" && url.pathname === "/") return html(res, page());
     if (req.method === "GET" && url.pathname === "/import") return html(res, importPage());
+    
+    const taskResult = await handleTasksApi(req, res, db);
+    if (taskResult !== null) return;
 
     if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
     if (req.method === "GET" && url.pathname === "/api/items/calendar") {
