@@ -111,6 +111,19 @@ function taskCardHtml(task) {
         </span>
       </div>
       <div class="kanban-task-detail">
+        <div class="kanban-task-status-switch">
+          <div class="status-label">状态切换</div>
+          <div class="status-buttons">
+            ${TASK_STATUSES.map(status => `
+              <button class="status-btn ${task.status === status ? 'active' : ''}" 
+                      data-status="${status}" 
+                      data-task-id="${task.id}"
+                      data-item-id="${task.modelId}">
+                ${status}
+              </button>
+            `).join('')}
+          </div>
+        </div>
         <div class="kanban-task-logs">
           ${(task.logs || []).slice(-5).map(log => `
             <div class="kanban-task-log">
@@ -256,6 +269,31 @@ function bindKanbanEvents() {
         if (task) task.open = !task.open;
       } else if (action === 'log') {
         addTaskNote(itemId, taskId);
+      }
+    };
+  });
+  
+  document.querySelectorAll('.status-btn').forEach(btn => {
+    btn.onclick = async function(e) {
+      e.stopPropagation();
+      const newStatus = btn.dataset.status;
+      const taskId = btn.dataset.taskId;
+      const itemId = btn.dataset.itemId;
+      
+      const task = kanbanTasks.find(t => t.id === taskId);
+      if (!task || task.status === newStatus) return;
+      
+      btn.disabled = true;
+      try {
+        await api(`/api/tasks/${taskId}/status?itemId=${encodeURIComponent(itemId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: newStatus })
+        });
+        task.status = newStatus;
+        renderKanbanBoard();
+      } catch (err) {
+        alert('更新任务状态失败: ' + err.message);
+        btn.disabled = false;
       }
     };
   });
