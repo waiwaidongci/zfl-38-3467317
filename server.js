@@ -3,6 +3,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseBuffer, generateTaskSummary } from "./lib/upload-parser.js";
+import { validateAll } from "./lib/data-validator.js";
+import { commitImport } from "./lib/data-writer.js";
+import { importPage } from "./lib/pages.js";
+import { parseMultipart, extractBoundary } from "./lib/multipart.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dbPath = join(__dirname, "data", "model-rigging-calibration.json");
@@ -136,6 +141,7 @@ function page() {
     .calendar-detail-header h3 { margin:0; font-size:16px; }
     .due-tag { display:inline-block; background:var(--calendar-due); color:var(--accent); padding:2px 8px; border-radius:4px; font-size:12px; font-weight:600; margin-left:6px; }
     .card .due-highlight { color:var(--warn); font-weight:700; }
+    .import-btn { background:#2d5a8e; }
     @media (max-width:900px){ header{display:block;padding:18px 16px;} main{grid-template-columns:1fr;padding:16px;} .calendar-cell{min-height:70px;padding:4px;} }
   </style>
 </head>
@@ -148,7 +154,10 @@ function page() {
         <button id="tabCalendar">交付日历</button>
       </div>
     </div>
-    <button id="reload">刷新</button>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button id="importBtn" class="import-btn">📥 批量导入</button>
+      <button id="reload">刷新</button>
+    </div>
   </header>
   <main id="main">
     <section id="listSection">
@@ -378,6 +387,7 @@ function page() {
     document.querySelector('#statusFilter').onchange = render;
     document.querySelector('#search').oninput = render;
     document.querySelector('#reload').onclick = load;
+    document.querySelector('#importBtn').onclick = () => { location.href = '/import'; };
     document.querySelector('#tabList').onclick = () => switchView('list');
     document.querySelector('#tabCalendar').onclick = () => switchView('calendar');
     document.querySelector('#prevMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() - 1); renderCalendar(); };
@@ -395,7 +405,10 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const db = await loadDb();
+
     if (req.method === "GET" && url.pathname === "/") return html(res, page());
+    if (req.method === "GET" && url.pathname === "/import") return html(res, importPage());
+
     if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
     if (req.method === "GET" && url.pathname === "/api/items/calendar") {
       const start = url.searchParams.get("start");
@@ -445,8 +458,38 @@ const server = http.createServer(async (req, res) => {
       return send(res, 201, item);
     }
     if (req.method === "GET" && url.pathname === "/api/stats") return send(res, 200, computeStats(db.items));
+
+    if (req.method === "POST" && url.pathname === "/api/import/preview") {
+      const contentType = req.headers["content-type"] || "";
+      const boundary = extractBoundary(contentType);
+      if (!boundary) return send(res, 400, { error: "invalid_multipart" });
+
+      const parts = await parseMultipart(req, boundary);
+      const filePart = parts.find(p => p.isFile && p.name === "file");
+      if (!filePart) return send(res, 400, { error: "no_file" });
+      if (filePart.data.length === 0) return send(res, 400, { error: "empty_file" });
+
+      const parsed = parseBuffer(filePart.data, filePart.filename || "");
+      const validated = validateAll(parsed, db.items);
+      validated.rows.forEach(r => {
+        r._taskPreview = generateTaskSummary(r.normalized);
+      });
+
+      return send(res, 200, validated);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/import/commit") {
+      const input = await body(req);
+      if (!input.rows || !Array.isArray(input.rows)) {
+        return send(res, 400, { error: "invalid_rows" });
+      }
+      const result = await commitImport(db, saveDb, input.rows);
+      return send(res, 200, result);
+    }
+
     send(res, 404, { error: "not_found" });
   } catch (error) {
+    console.error(error);
     send(res, 500, { error: error.message });
   }
 });
