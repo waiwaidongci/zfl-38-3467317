@@ -766,7 +766,7 @@ function page() {
         loadCalibrationRules();
       } else if (view === 'workspace') {
         if (window.initWorkspace) {
-          initWorkspace();
+          initWorkspace(window._wsIsInitializing && window._wsIsInitializing());
         }
       } else {
         renderList();
@@ -920,7 +920,7 @@ function page() {
         return;
       } else if (!id && !owner && currentView === 'detail') {
         goBack();
-      } else if (!id && !owner && window.wsCurrentWorkspace) {
+      } else if (!id && !owner && window._wsGetCurrentWorkspace && window._wsGetCurrentWorkspace()) {
         if (window.wsShowOwnerList) {
           window.wsShowOwnerList();
         }
@@ -945,7 +945,12 @@ function page() {
         await loadDetail(id);
       } else if (owner) {
         await itemsPromise;
+        if (window._wsSetInitializing) window._wsSetInitializing(true);
         switchView('workspace');
+        if (window.wsShowWorkspace) {
+          window.wsShowWorkspace(owner);
+        }
+        if (window._wsSetInitializing) window._wsSetInitializing(false);
       }
     }
 
@@ -953,8 +958,8 @@ function page() {
     const itemsPromise = load();
     initFromUrl();
   </script>
-  <script src="/public/kanban.js?v=2"></script>
-  <script src="/public/workspace.js?v=2"></script>
+  <script src="/public/kanban.js?v=4"></script>
+  <script src="/public/workspace.js?v=4"></script>
 </body>
 </html>`;
 }
