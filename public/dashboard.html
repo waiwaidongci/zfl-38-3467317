@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>交付风险仪表盘 - 古船模型帆索校准</title>
+  <link rel="stylesheet" href="/public/dashboard.css">
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <div>
+        <h1>交付风险仪表盘</h1>
+        <div class="meta">提前发现可能延期的古船模型</div>
+      </div>
+      <div class="view-tabs">
+        <button onclick="location.href='/'">模型列表</button>
+        <button onclick="location.href='/'">任务看板</button>
+        <button onclick="location.href='/'">交付日历</button>
+        <button class="active">风险仪表盘</button>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button id="refreshBtn" class="secondary">🔄 刷新</button>
+      <button onclick="location.href='/'">← 返回主页面</button>
+    </div>
+  </header>
+
+  <main id="dashboardMain">
+    <section id="summarySection">
+      <div class="stats" id="riskStats"></div>
+    </section>
+
+    <div class="dashboard-grid">
+      <section class="panel high-risk-section">
+        <div class="panel-header">
+          <h2>🚨 高风险模型列表</h2>
+          <div class="panel-actions">
+            <select id="riskLevelFilter">
+              <option value="all">全部风险</option>
+              <option value="high">仅高危</option>
+              <option value="medium">仅中危</option>
+            </select>
+          </div>
+        </div>
+        <div id="highRiskList" class="risk-list"></div>
+      </section>
+
+      <section class="panel owner-section">
+        <div class="panel-header">
+          <h2>👤 负责人风险分布</h2>
+        </div>
+        <div id="ownerDistribution" class="owner-list"></div>
+      </section>
+
+      <section class="panel pressure-section">
+        <div class="panel-header">
+          <h2>📅 未来7天交付压力</h2>
+        </div>
+        <div id="deliveryPressure" class="pressure-chart"></div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>📋 风险评估规则说明</h2>
+      </div>
+      <div class="rules-grid">
+        <div class="rule-card high">
+          <h3>高危风险</h3>
+          <ul>
+            <li>已逾期未交付</li>
+            <li>7天内交付且有未完成任务</li>
+            <li>风险评分 ≥ 70</li>
+          </ul>
+        </div>
+        <div class="rule-card medium">
+          <h3>中危风险</h3>
+          <ul>
+            <li>14天内交付且超50%任务未完成</li>
+            <li>超过7天无更新记录</li>
+            <li>风险评分 40-69</li>
+          </ul>
+        </div>
+        <div class="rule-card low">
+          <h3>低危风险</h3>
+          <ul>
+            <li>进度正常，任务有序推进</li>
+            <li>风险评分 &lt; 40</li>
+          </ul>
+        </div>
+        <div class="rule-card none">
+          <h3>无风险 / 未计划</h3>
+          <ul>
+            <li>已交付的模型不计风险</li>
+            <li>无交付日期单独归类</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/public/dashboard.js"></script>
+</body>
+</html>

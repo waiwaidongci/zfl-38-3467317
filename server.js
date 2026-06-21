@@ -9,6 +9,7 @@ import { commitImport } from "./lib/data-writer.js";
 import { importPage } from "./lib/pages.js";
 import { parseMultipart, extractBoundary } from "./lib/multipart.js";
 import { handleTasksApi } from "./lib/task-api.js";
+import { handleRiskApi } from "./lib/risk-api.js";
 import {
   loadDb as dalLoadDb,
   saveDb as dalSaveDb,
@@ -193,6 +194,7 @@ function page() {
         <button id="tabList" class="active">模型列表</button>
         <button id="tabKanban">任务看板</button>
         <button id="tabCalendar">交付日历</button>
+        <button id="tabDashboard">风险仪表盘</button>
       </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
@@ -477,6 +479,7 @@ function page() {
     document.querySelector('#tabList').onclick = () => switchView('list');
     document.querySelector('#tabKanban').onclick = () => switchView('kanban');
     document.querySelector('#tabCalendar').onclick = () => switchView('calendar');
+    document.querySelector('#tabDashboard').onclick = () => { location.href = '/dashboard'; };
     document.querySelector('#prevMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() - 1); renderCalendar(); };
     document.querySelector('#nextMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() + 1); renderCalendar(); };
     document.querySelector('#todayBtn').onclick = () => { viewDate = new Date(); selectedDate = formatDate(new Date()); renderCalendar(); };
@@ -504,9 +507,17 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/") return html(res, page());
     if (req.method === "GET" && url.pathname === "/import") return html(res, importPage());
+    if (req.method === "GET" && url.pathname === "/dashboard") {
+      const dashboardPath = join(__dirname, "public", "dashboard.html");
+      const served = await serveStatic(res, dashboardPath);
+      if (served) return;
+    }
     
     const taskResult = await handleTasksApi(req, res, db);
     if (taskResult !== null) return;
+
+    const riskResult = await handleRiskApi(req, res, db);
+    if (riskResult !== null) return;
 
     if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
     if (req.method === "GET" && url.pathname === "/api/items/calendar") {
