@@ -18,6 +18,7 @@ import {
   updateItem as dalUpdateItem,
   addItemLog as dalAddItemLog,
   createTask as dalCreateTask,
+  getItemWithTimeline,
   TASK_STATUSES
 } from "./lib/data-access.js";
 
@@ -183,6 +184,39 @@ function page() {
     .card .due-highlight { color:var(--warn); font-weight:700; }
     .import-btn { background:#2d5a8e; }
     main.kanban-view { grid-template-columns: 1fr; }
+    main.detail-view { grid-template-columns: 1fr; }
+    .detail-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+    .detail-header h2 { margin: 0; font-size: 22px; }
+    .detail-back-btn { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 8px 14px; font-size: 14px; }
+    .detail-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .detail-meta-item { background: var(--calendar-bg); padding: 10px 12px; border-radius: 6px; }
+    .detail-meta-item .meta-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .detail-meta-item .meta-value { font-weight: 600; font-size: 15px; }
+    .timeline-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+    .timeline-filter-btn { background: var(--calendar-bg); color: var(--muted); border: 1px solid var(--line); padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; }
+    .timeline-filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .timeline { position: relative; padding-left: 28px; }
+    .timeline::before { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; background: var(--line); }
+    .timeline-item { position: relative; padding-bottom: 20px; }
+    .timeline-item::before { content: ''; position: absolute; left: -24px; top: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); }
+    .timeline-item.type-建档::before { border-color: #2d5a8e; background: #e6eef7; }
+    .timeline-item.type-状态::before { border-color: #9b4937; background: #f5e6e2; }
+    .timeline-item.type-帆索::before { border-color: #526f43; background: #e6ebe2; }
+    .timeline-item.type-备注::before { border-color: #8b6914; background: #f7f0db; }
+    .timeline-item.type-任务::before { border-color: #6b5b95; background: #ece9f2; }
+    .timeline-time { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .timeline-type { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+    .timeline-type.建档 { background: #e6eef7; color: #2d5a8e; }
+    .timeline-type.状态 { background: #f5e6e2; color: #9b4937; }
+    .timeline-type.帆索 { background: #e6ebe2; color: #526f43; }
+    .timeline-type.备注 { background: #f7f0db; color: #8b6914; }
+    .timeline-type.任务 { background: #ece9f2; color: #6b5b95; }
+    .timeline-note { font-size: 14px; color: var(--ink); line-height: 1.5; }
+    .timeline-task-info { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .timeline-empty { text-align: center; padding: 40px 20px; }
+    .timeline-empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
+    .timeline-empty h3 { margin: 0 0 8px; font-size: 16px; color: var(--ink); }
+    .timeline-empty p { margin: 0; font-size: 13px; color: var(--muted); }
     @media (max-width:900px){ header{display:block;padding:18px 16px;} main{grid-template-columns:1fr;padding:16px;} .calendar-cell{min-height:70px;padding:4px;} }
   </style>
   <link rel="stylesheet" href="/public/kanban.css">
@@ -255,6 +289,23 @@ function page() {
         <div class="kanban-board" id="kanbanBoard"></div>
       </div>
     </section>
+    <section id="detailSection" style="display:none">
+      <div class="panel">
+        <div class="detail-header">
+          <div>
+            <h2 id="detailTitle">模型详情</h2>
+            <div class="meta" id="detailSubtitle"></div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="detailAddNoteBtn" class="secondary">追加备注</button>
+            <button class="detail-back-btn" id="detailBackBtn">← 返回</button>
+          </div>
+        </div>
+        <div class="detail-meta" id="detailMeta"></div>
+        <div class="timeline-filters" id="timelineFilters"></div>
+        <div id="timelineContainer"></div>
+      </div>
+    </section>
   </main>
   <script>
     const fields = [["code","模型编号","text"],["shipType","船型","text"],["scale","比例","text"],["mastCount","桅杆数量","number"],["riggingMaterial","帆索材料","text"],["owner","负责人","text"],["dueDate","交付日期","date"]];
@@ -269,10 +320,21 @@ function page() {
     const calendarGrid = document.querySelector('#calendarGrid');
     const calendarTitle = document.querySelector('#calendarTitle');
     const calendarDetail = document.querySelector('#calendarDetail');
+    const detailSection = document.querySelector('#detailSection');
+    const detailTitle = document.querySelector('#detailTitle');
+    const detailSubtitle = document.querySelector('#detailSubtitle');
+    const detailMeta = document.querySelector('#detailMeta');
+    const timelineFilters = document.querySelector('#timelineFilters');
+    const timelineContainer = document.querySelector('#timelineContainer');
+    const detailBackBtn = document.querySelector('#detailBackBtn');
+    const detailAddNoteBtn = document.querySelector('#detailAddNoteBtn');
     let items = [];
     let currentView = 'list';
+    let previousView = 'list';
     let viewDate = new Date();
     let selectedDate = null;
+    let currentDetailItem = null;
+    let timelineFilter = '';
 
     async function api(path, options) {
       const res = await fetch(path, options && options.body ? { ...options, headers:{ 'Content-Type':'application/json' } } : options);
@@ -308,13 +370,158 @@ function page() {
       return '<div class="empty"><div class="empty-icon">' + icon + '</div><h3>' + title + '</h3><div class="meta">' + desc + '</div></div>';
     }
 
+    function formatDateTime(dateStr) {
+      if (!dateStr) return '';
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const h = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      return y + '-' + m + '-' + day + ' ' + h + ':' + min;
+    }
+
+    function timelineEmptyHtml() {
+      return '<div class="timeline-empty"><div class="timeline-empty-icon">📝</div><h3>暂无时间线记录</h3><p>该模型还没有任何操作记录</p></div>';
+    }
+
+    function timelineItemHtml(item) {
+      const taskInfo = item.source === 'task' && item.taskPosition
+        ? '<div class="timeline-task-info">任务：' + item.taskPosition + '</div>'
+        : '';
+      return '<div class="timeline-item type-' + item.type + '">' +
+        '<div class="timeline-time">' + formatDateTime(item.at) + '</div>' +
+        '<span class="timeline-type ' + item.type + '">' + item.type + '</span>' +
+        '<div class="timeline-note">' + (item.note || '') + '</div>' +
+        taskInfo +
+        '</div>';
+    }
+
+    function renderTimelineFilters(types) {
+      const allTypes = ['建档', '状态', '帆索', '备注', '任务'];
+      let html = '<span class="meta" style="margin-right:4px">类型筛选：</span>';
+      html += '<button class="timeline-filter-btn ' + (timelineFilter === '' ? 'active' : '') + '" data-filter="">全部</button>';
+      for (const type of allTypes) {
+        const hasType = types.includes(type);
+        if (hasType) {
+          html += '<button class="timeline-filter-btn ' + (timelineFilter === type ? 'active' : '') + '" data-filter="' + type + '">' + type + '</button>';
+        }
+      }
+      timelineFilters.innerHTML = html;
+      document.querySelectorAll('.timeline-filter-btn').forEach(btn => {
+        btn.onclick = () => {
+          timelineFilter = btn.dataset.filter;
+          renderTimeline();
+          renderTimelineFilters(currentDetailItem.timelineTypes || []);
+        };
+      });
+    }
+
+    function renderTimeline() {
+      if (!currentDetailItem || !currentDetailItem.timeline) {
+        timelineContainer.innerHTML = timelineEmptyHtml();
+        return;
+      }
+      let filtered = currentDetailItem.timeline;
+      if (timelineFilter) {
+        filtered = filtered.filter(t => t.type === timelineFilter);
+      }
+      if (filtered.length === 0) {
+        timelineContainer.innerHTML = timelineEmptyHtml();
+        return;
+      }
+      timelineContainer.innerHTML = '<div class="timeline">' +
+        filtered.map(item => timelineItemHtml(item)).join('') +
+        '</div>';
+    }
+
+    function renderDetailMeta(item) {
+      const metaItems = [
+        ['模型编号', item.code || item.id],
+        ['船型', item.shipType || ''],
+        ['比例', item.scale || ''],
+        ['桅杆数量', item.mastCount || ''],
+        ['帆索材料', item.riggingMaterial || ''],
+        ['负责人', item.owner || ''],
+        ['交付日期', item.dueDate || '未设置'],
+        ['当前状态', item.status || '']
+      ];
+      detailMeta.innerHTML = metaItems.map(([label, value]) =>
+        '<div class="detail-meta-item"><div class="meta-label">' + label + '</div><div class="meta-value">' + value + '</div></div>'
+      ).join('');
+    }
+
+    async function loadDetail(itemId) {
+      try {
+        const detail = await api('/api/items/' + encodeURIComponent(itemId));
+        currentDetailItem = detail;
+        timelineFilter = '';
+        renderDetailPage();
+      } catch (err) {
+        alert('加载详情失败：' + err.message);
+        goBack();
+      }
+    }
+
+    function renderDetailPage() {
+      if (!currentDetailItem) return;
+      detailTitle.textContent = currentDetailItem.code || currentDetailItem.id;
+      detailSubtitle.textContent = currentDetailItem.shipType || '';
+      renderDetailMeta(currentDetailItem);
+      renderTimelineFilters(currentDetailItem.timelineTypes || []);
+      renderTimeline();
+    }
+
+    function showDetailView() {
+      previousView = currentView;
+      currentView = 'detail';
+      document.querySelector('#listSection').style.display = 'none';
+      document.querySelector('#listSectionRight').style.display = 'none';
+      document.querySelector('#calendarSection').style.display = 'none';
+      document.querySelector('#kanbanSection').style.display = 'none';
+      detailSection.style.display = '';
+      document.querySelector('#main').classList.add('detail-view');
+      document.querySelector('#tabList').classList.remove('active');
+      document.querySelector('#tabKanban').classList.remove('active');
+      document.querySelector('#tabCalendar').classList.remove('active');
+    }
+
+    function goBack() {
+      if (previousView === 'calendar') {
+        switchView('calendar');
+      } else if (previousView === 'kanban') {
+        switchView('kanban');
+      } else {
+        switchView('list');
+      }
+    }
+
+    async function addDetailNote() {
+      if (!currentDetailItem) return;
+      const note = prompt('请输入备注内容：');
+      if (!note || !note.trim()) return;
+      const itemId = currentDetailItem.id || currentDetailItem.code;
+      try {
+        await api('/api/items/' + encodeURIComponent(itemId) + '/logs', {
+          method: 'POST',
+          body: JSON.stringify({ step: '备注', note: note.trim() })
+        });
+        await loadDetail(itemId);
+        await load();
+      } catch (err) {
+        alert('追加备注失败：' + err.message);
+      }
+    }
+
     function cardHtml(item) {
+      const itemId = item.id || item.code;
       const main = fields.slice(0,4).map(([key,label]) => '<div><b>'+label+'</b> '+(item[key] ?? '')+'</div>').join('');
       const dueHtml = item.dueDate ? '<div class="meta"><b>交付日期</b> <span class="' + (isOverdue(item.dueDate) && item.status !== '已交付' ? 'due-highlight' : '') + '">' + item.dueDate + '</span>' + (isOverdue(item.dueDate) && item.status !== '已交付' ? ' <span class="due-tag">已逾期</span>' : '') + '</div>' : '';
       const ownerHtml = item.owner ? '<div class="meta"><b>负责人</b> ' + item.owner + '</div>' : '';
       const tasks = (item.tasks || []).map(t => '<div class="meta">任务 '+t.position+' · '+t.status+' · '+t.tension+'</div>').join('');
       const logs = (item.logs || []).slice(-4).map(l => '<div>'+l.step+'：'+l.note+'</div>').join('');
-      return '<article class="card"><h3>'+(item.code || item.id)+'</h3><span class="pill">'+item.status+'</span>'+main+ownerHtml+dueHtml+tasks+'<label>状态</label><select data-status="'+(item.id || item.code)+'">'+stages.map(s => '<option '+(s===item.status?'selected':'')+'>'+s+'</option>').join('')+'</select><button class="secondary" data-note="'+(item.id || item.code)+'">追加备注</button><div class="logs meta">'+(logs || '暂无记录')+'</div></article>';
+      return '<article class="card"><h3 style="cursor:pointer;color:var(--accent)" data-detail="' + itemId + '">' + (item.code || item.id) + '</h3><span class="pill">'+item.status+'</span>'+main+ownerHtml+dueHtml+tasks+'<label>状态</label><select data-status="'+itemId+'">'+stages.map(s => '<option '+(s===item.status?'selected':'')+'>'+s+'</option>').join('')+'</select><button class="secondary" data-note="'+itemId+'">追加备注</button><button class="ghost" style="margin-top:4px" data-detail="' + itemId + '">查看时间线 →</button><div class="logs meta">'+(logs || '暂无记录')+'</div></article>';
     }
 
     function renderList() {
@@ -333,8 +540,9 @@ function page() {
     }
 
     function bindCardEvents() {
-      document.querySelectorAll('[data-status]').forEach(sel => sel.onchange = async () => { await api('/api/items/'+sel.dataset.status, { method:'PATCH', body: JSON.stringify({ status: sel.value }) }); await load(); });
-      document.querySelectorAll('[data-note]').forEach(btn => btn.onclick = async () => { const id = btn.dataset.note; const note = prompt('记录备注'); if (note) { await api('/api/items/'+id+'/logs', { method:'POST', body: JSON.stringify({ step:'备注', note }) }); await load(); } });
+      document.querySelectorAll('[data-status]').forEach(sel => sel.onchange = async () => { await api('/api/items/'+sel.dataset.status, { method:'PATCH', body: JSON.stringify({ status: sel.value }) }); await load(); if (currentView === 'detail' && currentDetailItem && (sel.dataset.status === currentDetailItem.id || sel.dataset.status === currentDetailItem.code)) { await loadDetail(sel.dataset.status); } });
+      document.querySelectorAll('[data-note]').forEach(btn => btn.onclick = async () => { const id = btn.dataset.note; const note = prompt('记录备注'); if (note) { await api('/api/items/'+id+'/logs', { method:'POST', body: JSON.stringify({ step:'备注', note }) }); await load(); if (currentView === 'detail' && currentDetailItem && (id === currentDetailItem.id || id === currentDetailItem.code)) { await loadDetail(id); } } });
+      document.querySelectorAll('[data-detail]').forEach(el => el.onclick = async (e) => { e.stopPropagation(); const id = el.dataset.detail; showDetailView(); await loadDetail(id); });
     }
 
     function getItemsByDate(dateStr) {
@@ -438,6 +646,8 @@ function page() {
       document.querySelector('#listSectionRight').style.display = view === 'list' ? '' : 'none';
       document.querySelector('#calendarSection').style.display = view === 'calendar' ? '' : 'none';
       document.querySelector('#kanbanSection').style.display = view === 'kanban' ? '' : 'none';
+      detailSection.style.display = 'none';
+      document.querySelector('#main').classList.remove('detail-view');
       document.querySelector('#main').classList.toggle('calendar-view', view === 'calendar');
       document.querySelector('#main').classList.toggle('kanban-view', view === 'kanban');
       if (view === 'calendar') {
@@ -480,6 +690,8 @@ function page() {
     document.querySelector('#tabList').onclick = () => switchView('list');
     document.querySelector('#tabKanban').onclick = () => switchView('kanban');
     document.querySelector('#tabCalendar').onclick = () => switchView('calendar');
+    detailBackBtn.onclick = goBack;
+    detailAddNoteBtn.onclick = addDetailNote;
     document.querySelector('#tabDashboard').onclick = () => { location.href = '/dashboard'; };
     document.querySelector('#prevMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() - 1); renderCalendar(); };
     document.querySelector('#nextMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() + 1); renderCalendar(); };
@@ -521,6 +733,13 @@ const server = http.createServer(async (req, res) => {
     if (riskResult !== null) return;
 
     if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
+
+    const itemDetailMatch = url.pathname.match(/^\/api\/items\/([^/]+)$/);
+    if (itemDetailMatch && req.method === "GET") {
+      const detail = getItemWithTimeline(db, itemDetailMatch[1]);
+      if (!detail) return send(res, 404, { error: "item_not_found" });
+      return send(res, 200, detail);
+    }
     if (req.method === "GET" && url.pathname === "/api/items/calendar") {
       const start = url.searchParams.get("start");
       const end = url.searchParams.get("end");
