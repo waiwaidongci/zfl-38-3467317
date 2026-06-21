@@ -1,0 +1,70 @@
+{
+  "rules": [
+    {
+      "id": "CR-1782037134864-r37t",
+      "material": "尼龙线",
+      "scale": "1:32",
+      "position": "前桅稳索",
+      "tensionRange": "正常-偏紧",
+      "suggestedTension": "正常",
+      "noteTemplate": "测试新增的尼龙线校准规则",
+      "createdAt": "2026-06-21T10:18:54.864Z",
+      "updatedAt": "2026-06-21T10:18:54.864Z"
+    },
+    {
+      "id": "CR-1",
+      "material": "蜡线",
+      "scale": "1:48",
+      "position": "前桅侧支索",
+      "tensionRange": "正常-偏紧",
+      "suggestedTension": "偏紧",
+      "noteTemplate": "已修改：蜡线前桅侧支索建议偏紧一点",
+      "createdAt": "2026-06-01T00:00:00.000Z",
+      "updatedAt": "2026-06-21T10:19:08.105Z"
+    },
+    {
+      "id": "CR-2",
+      "material": "蜡线",
+      "scale": "1:48",
+      "position": "主桅侧支索",
+      "tensionRange": "正常-偏紧",
+      "suggestedTension": "偏紧",
+      "noteTemplate": "主桅承重较大，建议偏紧但不僵直，注意受力均匀",
+      "createdAt": "2026-06-01T00:00:00.000Z",
+      "updatedAt": "2026-06-01T00:00:00.000Z"
+    },
+    {
+      "id": "CR-3",
+      "material": "麻绳",
+      "scale": "1:50",
+      "position": "前桅升帆索",
+      "tensionRange": "偏松-正常",
+      "suggestedTension": "正常",
+      "noteTemplate": "麻绳伸缩性较强，建议留余量，后期可根据实际情况收紧",
+      "createdAt": "2026-06-01T00:00:00.000Z",
+      "updatedAt": "2026-06-01T00:00:00.000Z"
+    },
+    {
+      "id": "CR-4",
+      "material": "棉线",
+      "scale": "1:60",
+      "position": "后桅稳索",
+      "tensionRange": "正常",
+      "suggestedTension": "正常",
+      "noteTemplate": "棉线较柔软，调整时注意保持稳定，避免频繁松紧",
+      "createdAt": "2026-06-01T00:00:00.000Z",
+      "updatedAt": "2026-06-01T00:00:00.000Z"
+    },
+    {
+      "id": "CR-5",
+      "material": "丝线",
+      "scale": "1:80",
+      "position": "单桅侧支索",
+      "tensionRange": "正常-偏紧",
+      "suggestedTension": "正常",
+      "noteTemplate": "丝线精细，轻调即可，注意不要过度用力导致断线",
+      "createdAt": "2026-06-01T00:00:00.000Z",
+      "updatedAt": "2026-06-01T00:00:00.000Z"
+    }
+  ]
+}

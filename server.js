@@ -10,6 +10,7 @@ import { importPage } from "./lib/pages.js";
 import { parseMultipart, extractBoundary } from "./lib/multipart.js";
 import { handleTasksApi } from "./lib/task-api.js";
 import { handleRiskApi } from "./lib/risk-api.js";
+import { handleCalibrationApi } from "./lib/calibration-api.js";
 import {
   loadDb as dalLoadDb,
   saveDb as dalSaveDb,
@@ -230,6 +231,7 @@ function page() {
         <button id="tabKanban">任务看板</button>
         <button id="tabCalendar">交付日历</button>
         <button id="tabDashboard">风险仪表盘</button>
+        <button id="tabCalibration">校准库管理</button>
       </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
@@ -306,6 +308,23 @@ function page() {
         <div id="timelineContainer"></div>
       </div>
     </section>
+    <section id="calibrationSection" style="display:none">
+      <div class="panel">
+        <div class="detail-header">
+          <div>
+            <h2>材料与松紧校准库</h2>
+            <div class="meta">维护不同帆索材料、模型比例和索具位置对应的建议松紧范围与调整建议</div>
+          </div>
+        </div>
+        <div class="toolbar">
+          <select id="calMaterialFilter"><option value="">全部材料</option></select>
+          <select id="calScaleFilter"><option value="">全部比例</option></select>
+          <input id="calSearch" placeholder="搜索关键词">
+          <button id="calAddBtn">+ 新增规则</button>
+        </div>
+        <div class="grid" id="calibrationRules"></div>
+      </div>
+    </section>
   </main>
   <script>
     const fields = [["code","模型编号","text"],["shipType","船型","text"],["scale","比例","text"],["mastCount","桅杆数量","number"],["riggingMaterial","帆索材料","text"],["owner","负责人","text"],["dueDate","交付日期","date"]];
@@ -328,13 +347,21 @@ function page() {
     const timelineContainer = document.querySelector('#timelineContainer');
     const detailBackBtn = document.querySelector('#detailBackBtn');
     const detailAddNoteBtn = document.querySelector('#detailAddNoteBtn');
+    const calibrationSection = document.querySelector('#calibrationSection');
+    const calibrationRulesEl = document.querySelector('#calibrationRules');
+    const calMaterialFilter = document.querySelector('#calMaterialFilter');
+    const calScaleFilter = document.querySelector('#calScaleFilter');
+    const calSearch = document.querySelector('#calSearch');
+    const calAddBtn = document.querySelector('#calAddBtn');
     let items = [];
+    let calibrationRules = [];
     let currentView = 'list';
     let previousView = 'list';
     let viewDate = new Date();
     let selectedDate = null;
     let currentDetailItem = null;
     let timelineFilter = '';
+    let editingCalibrationRule = null;
 
     async function api(path, options) {
       const res = await fetch(path, options && options.body ? { ...options, headers:{ 'Content-Type':'application/json' } } : options);
@@ -345,7 +372,58 @@ function page() {
 
     function renderForms() {
       document.querySelector('#fields').innerHTML = fields.map(([key,label,type]) => '<label>'+label+'</label><input name="'+key+'" type="'+type+'" '+(key==='code'?'required':'')+'>').join('');
-      document.querySelector('#extraFields').innerHTML = extraFields.map(([key,label]) => '<label>'+label+'</label><input name="'+key+'">').join('');
+      let extraHtml = '';
+      extraFields.forEach(([key,label]) => {
+        if (key === 'tension') {
+          extraHtml += '<label>' + label + ' <span id="tensionHint" class="meta" style="margin-left:6px"></span></label><input name="'+key+'" id="taskTensionInput">';
+        } else if (key === 'note') {
+          extraHtml += '<label>' + label + ' <span id="noteHint" class="meta" style="margin-left:6px"></span></label><textarea name="'+key+'" id="taskNoteInput" style="width:100%;border:1px solid var(--line);border-radius:6px;padding:9px;font:inherit;background:#fff;min-height:68px;"></textarea>';
+        } else {
+          extraHtml += '<label>'+label+'</label><input name="'+key+'" id="taskPositionInput">';
+        }
+      });
+      document.querySelector('#extraFields').innerHTML = extraHtml;
+      bindTaskFormCalibration();
+    }
+
+    function bindTaskFormCalibration() {
+      const positionInput = document.querySelector('#taskPositionInput');
+      const tensionInput = document.querySelector('#taskTensionInput');
+      const noteInput = document.querySelector('#taskNoteInput');
+      const tensionHint = document.querySelector('#tensionHint');
+      const noteHint = document.querySelector('#noteHint');
+      if (!positionInput) return;
+
+      async function tryMatchCalibration() {
+        const selectedItemId = itemSelect.value;
+        const selectedItem = items.find(it => (it.id || it.code) === selectedItemId);
+        const position = positionInput.value.trim();
+        if (!selectedItem || !position) {
+          if (tensionHint) tensionHint.textContent = '';
+          if (noteHint) noteHint.textContent = '';
+          return;
+        }
+        const material = selectedItem.riggingMaterial || '';
+        const scale = selectedItem.scale || '';
+        try {
+          const matched = await api('/api/calibration/match?material=' + encodeURIComponent(material) + '&scale=' + encodeURIComponent(scale) + '&position=' + encodeURIComponent(position));
+          if (matched) {
+            if (tensionHint) tensionHint.textContent = '（校准库建议：' + matched.suggestedTension + '，范围：' + (matched.tensionRange || '—') + '）';
+            if (noteHint) noteHint.textContent = '（已填入校准库建议模板，可修改）';
+            if (tensionInput && !tensionInput.value) tensionInput.value = matched.suggestedTension || '';
+            if (noteInput && !noteInput.value && matched.noteTemplate) noteInput.value = matched.noteTemplate;
+          } else {
+            if (tensionHint) tensionHint.textContent = '（无匹配校准规则，可手动录入）';
+            if (noteHint) noteHint.textContent = '';
+          }
+        } catch (e) {
+          if (tensionHint) tensionHint.textContent = '';
+          if (noteHint) noteHint.textContent = '';
+        }
+      }
+
+      positionInput.addEventListener('input', tryMatchCalibration);
+      itemSelect.addEventListener('change', tryMatchCalibration);
     }
 
     function isSameDay(d1, d2) {
@@ -650,10 +728,12 @@ function page() {
       document.querySelector('#tabList').classList.toggle('active', view === 'list');
       document.querySelector('#tabKanban').classList.toggle('active', view === 'kanban');
       document.querySelector('#tabCalendar').classList.toggle('active', view === 'calendar');
+      document.querySelector('#tabCalibration').classList.toggle('active', view === 'calibration');
       document.querySelector('#listSection').style.display = view === 'list' ? '' : 'none';
       document.querySelector('#listSectionRight').style.display = view === 'list' ? '' : 'none';
       document.querySelector('#calendarSection').style.display = view === 'calendar' ? '' : 'none';
       document.querySelector('#kanbanSection').style.display = view === 'kanban' ? '' : 'none';
+      calibrationSection.style.display = view === 'calibration' ? '' : 'none';
       detailSection.style.display = 'none';
       document.querySelector('#main').classList.remove('detail-view');
       document.querySelector('#main').classList.toggle('calendar-view', view === 'calendar');
@@ -664,6 +744,8 @@ function page() {
         if (window.initKanban) {
           initKanban();
         }
+      } else if (view === 'calibration') {
+        loadCalibrationRules();
       } else {
         renderList();
       }
@@ -673,6 +755,79 @@ function page() {
       if (currentView === 'list') renderList();
       else if (currentView === 'calendar') renderCalendar();
       else if (currentView === 'kanban' && window.refreshKanban) refreshKanban();
+      else if (currentView === 'calibration') renderCalibrationRules();
+    }
+
+    async function loadCalibrationRules() {
+      try {
+        const params = new URLSearchParams();
+        if (calMaterialFilter.value) params.set('material', calMaterialFilter.value);
+        if (calScaleFilter.value) params.set('scale', calScaleFilter.value);
+        if (calSearch.value.trim()) params.set('keyword', calSearch.value.trim());
+        const query = params.toString() ? '?' + params.toString() : '';
+        calibrationRules = await api('/api/calibration/rules' + query);
+        const filters = await api('/api/calibration/filters');
+        calMaterialFilter.innerHTML = '<option value="">全部材料</option>' + filters.materials.map(m => '<option value="' + m + '">' + m + '</option>').join('');
+        calScaleFilter.innerHTML = '<option value="">全部比例</option>' + filters.scales.map(s => '<option value="' + s + '">' + s + '</option>').join('');
+        renderCalibrationRules();
+      } catch (e) {
+        alert('加载校准库失败：' + e.message);
+      }
+    }
+
+    function renderCalibrationRules() {
+      if (calibrationRules.length === 0) {
+        calibrationRulesEl.innerHTML = emptyHtml('📐', '暂无校准规则', '点击"新增规则"添加第一条材料与松紧校准规则');
+        return;
+      }
+      calibrationRulesEl.innerHTML = calibrationRules.map(rule => calibrationRuleCardHtml(rule)).join('');
+      bindCalibrationRuleEvents();
+    }
+
+    function calibrationRuleCardHtml(rule) {
+      return '<article class="card"><h3 style="margin:0">' + rule.material + ' · ' + rule.scale + '</h3><div class="meta"><b>索具位置</b> ' + rule.position + '</div><div class="meta"><b>建议松紧范围</b> <span class="pill">' + (rule.tensionRange || '—') + '</span></div><div class="meta"><b>建议松紧状态</b> <span class="pill" style="background:#e6ebe2;color:var(--accent);border-color:var(--accent);">' + (rule.suggestedTension || '—') + '</span></div><div class="meta" style="margin-top:6px"><b>备注模板</b></div><div style="background:var(--calendar-bg);padding:8px 10px;border-radius:6px;font-size:13px;line-height:1.5">' + (rule.noteTemplate || '（无）') + '</div><div class="meta" style="margin-top:6px">更新于 ' + formatDateTime(rule.updatedAt) + '</div><div style="display:flex;gap:8px;margin-top:8px"><button class="secondary" data-cal-edit="' + rule.id + '">编辑</button><button class="ghost" data-cal-del="' + rule.id + '">删除</button></div></article>';
+    }
+
+    function bindCalibrationRuleEvents() {
+      document.querySelectorAll('[data-cal-edit]').forEach(btn => btn.onclick = () => openCalibrationForm(btn.dataset.calEdit));
+      document.querySelectorAll('[data-cal-del]').forEach(btn => btn.onclick = async () => {
+        if (!confirm('确定删除该校准规则吗？删除不影响历史任务。')) return;
+        try {
+          await api('/api/calibration/rules/' + encodeURIComponent(btn.dataset.calDel), { method: 'DELETE' });
+          await loadCalibrationRules();
+        } catch (e) {
+          alert('删除失败：' + e.message);
+        }
+      });
+    }
+
+    function openCalibrationForm(ruleId) {
+      const rule = ruleId ? calibrationRules.find(r => r.id === ruleId) : null;
+      editingCalibrationRule = rule || null;
+      const isEdit = !!rule;
+      const title = isEdit ? '编辑校准规则' : '新增校准规则';
+      const data = rule || { material: '', scale: '', position: '', tensionRange: '', suggestedTension: '', noteTemplate: '' };
+      const html = '<div id="calFormOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;"><div class="panel" style="max-width:520px;width:100%;max-height:90vh;overflow:auto;"><h2 style="margin:0 0 12px">' + title + '</h2><form id="calRuleForm"><label>帆索材料</label><input name="material" value="' + (data.material || '') + '" required placeholder="如：蜡线、麻绳、棉线"><label>模型比例</label><input name="scale" value="' + (data.scale || '') + '" required placeholder="如：1:48、1:50"><label>索具位置</label><input name="position" value="' + (data.position || '') + '" required placeholder="如：前桅侧支索、主桅升帆索"><label>建议松紧范围</label><input name="tensionRange" value="' + (data.tensionRange || '') + '" placeholder="如：正常-偏紧、偏松-正常"><label>建议松紧状态</label><input name="suggestedTension" value="' + (data.suggestedTension || '') + '" placeholder="如：正常、偏紧、偏松"><label>备注模板</label><textarea name="noteTemplate" style="width:100%;border:1px solid var(--line);border-radius:6px;padding:9px;font:inherit;background:#fff;min-height:80px;" placeholder="调整建议备注模板...">' + (data.noteTemplate || '') + '</textarea><div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;"><button type="button" class="ghost" id="calCancelBtn">取消</button><button type="submit">' + (isEdit ? '保存修改' : '创建规则') + '</button></div></form></div></div>';
+      document.body.insertAdjacentHTML('beforeend', html);
+      const overlay = document.querySelector('#calFormOverlay');
+      const form = document.querySelector('#calRuleForm');
+      document.querySelector('#calCancelBtn').onclick = () => overlay.remove();
+      overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+      form.onsubmit = async (ev) => {
+        ev.preventDefault();
+        const formData = Object.fromEntries(new FormData(form).entries());
+        try {
+          if (isEdit) {
+            await api('/api/calibration/rules/' + encodeURIComponent(ruleId), { method: 'PATCH', body: JSON.stringify(formData) });
+          } else {
+            await api('/api/calibration/rules', { method: 'POST', body: JSON.stringify(formData) });
+          }
+          overlay.remove();
+          await loadCalibrationRules();
+        } catch (e) {
+          alert('保存失败：' + e.message);
+        }
+      };
     }
 
     async function load() {
@@ -698,6 +853,11 @@ function page() {
     document.querySelector('#tabList').onclick = () => switchView('list');
     document.querySelector('#tabKanban').onclick = () => switchView('kanban');
     document.querySelector('#tabCalendar').onclick = () => switchView('calendar');
+    document.querySelector('#tabCalibration').onclick = () => switchView('calibration');
+    calAddBtn.onclick = () => openCalibrationForm();
+    calMaterialFilter.onchange = loadCalibrationRules;
+    calScaleFilter.onchange = loadCalibrationRules;
+    calSearch.oninput = loadCalibrationRules;
     detailBackBtn.onclick = goBack;
     detailAddNoteBtn.onclick = addDetailNote;
     document.querySelector('#tabDashboard').onclick = () => { location.href = '/dashboard'; };
@@ -779,6 +939,9 @@ const server = http.createServer(async (req, res) => {
 
     const riskResult = await handleRiskApi(req, res, db);
     if (riskResult !== null) return;
+
+    const calibrationResult = await handleCalibrationApi(req, res);
+    if (calibrationResult !== null) return;
 
     if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
 
