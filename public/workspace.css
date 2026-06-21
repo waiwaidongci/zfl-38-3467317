@@ -1,0 +1,543 @@
+.ws-owners-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.ws-owner-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ws-owner-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 10px rgba(82, 111, 67, 0.12);
+}
+
+.ws-owner-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ws-owner-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.ws-owner-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ws-owner-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ws-owner-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 50px;
+}
+
+.ws-owner-stat .num {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.ws-owner-stat .lbl {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ws-owner-stat .num.warn {
+  color: var(--warn);
+}
+
+.ws-owner-stat .num.accent {
+  color: var(--accent);
+}
+
+.ws-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ws-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ws-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ws-header-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.ws-header-info h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.ws-header-info .meta {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.ws-summary-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ws-summary-stat {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ws-summary-stat .num {
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.ws-summary-stat .lbl {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ws-section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+}
+
+.ws-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-section-title .badge {
+  background: var(--bg);
+  color: var(--muted);
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ws-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.ws-model-card {
+  background: var(--calendar-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s;
+}
+
+.ws-model-card:hover {
+  border-color: var(--accent);
+}
+
+.ws-model-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ws-model-code {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.ws-model-code:hover {
+  text-decoration: underline;
+}
+
+.ws-model-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ws-model-status.status-待检查 {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.ws-model-status.status-校准中 {
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.ws-model-status.status-待复核 {
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.ws-model-status.status-已交付 {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.ws-model-meta {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.ws-model-due {
+  font-size: 12px;
+}
+
+.ws-model-due.overdue {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.ws-model-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.ws-model-actions button,
+.ws-model-actions select {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 5px;
+}
+
+.ws-model-actions select {
+  border: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ws-model-actions .ws-btn-note {
+  background: #69736a;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ws-model-actions .ws-btn-detail {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.ws-model-actions .ws-btn-detail:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.ws-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ws-task-item {
+  background: var(--calendar-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ws-task-position {
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 120px;
+}
+
+.ws-task-model {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.ws-task-model:hover {
+  text-decoration: underline;
+}
+
+.ws-task-tension {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.ws-task-tension.tension-tight {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.ws-task-tension.tension-loose {
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.ws-task-tension.tension-normal {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.ws-task-tension.tension-pending {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.ws-task-status-switch {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.ws-task-status-btn {
+  padding: 3px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.ws-task-status-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ws-task-status-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  cursor: default;
+}
+
+.ws-upcoming-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ws-upcoming-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: var(--calendar-bg);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.ws-upcoming-item:hover {
+  border-color: var(--accent);
+}
+
+.ws-upcoming-item.overdue {
+  border-left: 3px solid var(--warn);
+}
+
+.ws-upcoming-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ws-upcoming-code {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.ws-upcoming-ship {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ws-upcoming-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.ws-upcoming-date.overdue {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.ws-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  padding-left: 24px;
+}
+
+.ws-logs-list::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--line);
+}
+
+.ws-log-item {
+  position: relative;
+  padding: 8px 0 12px;
+}
+
+.ws-log-item::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 2px solid var(--accent);
+}
+
+.ws-log-time {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ws-log-step {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.ws-log-step.step-建档 { background: #e6eef7; color: #2d5a8e; }
+.ws-log-step.step-状态 { background: #f5e6e2; color: #9b4937; }
+.ws-log-step.step-帆索 { background: #e6ebe2; color: #526f43; }
+.ws-log-step.step-备注 { background: #f7f0db; color: #8b6914; }
+.ws-log-step.step-任务 { background: #ece9f2; color: #6b5b95; }
+
+.ws-log-note {
+  font-size: 13px;
+  color: var(--ink);
+  margin-top: 3px;
+}
+
+.ws-log-model {
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.ws-log-model:hover {
+  text-decoration: underline;
+}
+
+.ws-empty {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--muted);
+}
+
+.ws-empty-icon {
+  font-size: 40px;
+  opacity: 0.5;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 900px) {
+  .ws-owners-grid {
+    grid-template-columns: 1fr;
+  }
+  .ws-model-grid {
+    grid-template-columns: 1fr;
+  }
+  .ws-task-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .ws-task-status-switch {
+    margin-left: 0;
+  }
+}

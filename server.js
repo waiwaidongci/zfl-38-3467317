@@ -11,6 +11,7 @@ import { parseMultipart, extractBoundary } from "./lib/multipart.js";
 import { handleTasksApi } from "./lib/task-api.js";
 import { handleRiskApi } from "./lib/risk-api.js";
 import { handleCalibrationApi } from "./lib/calibration-api.js";
+import { handleOwnerApi } from "./lib/owner-api.js";
 import {
   loadDb as dalLoadDb,
   saveDb as dalSaveDb,
@@ -221,6 +222,7 @@ function page() {
     @media (max-width:900px){ header{display:block;padding:18px 16px;} main{grid-template-columns:1fr;padding:16px;} .calendar-cell{min-height:70px;padding:4px;} }
   </style>
   <link rel="stylesheet" href="/public/kanban.css">
+  <link rel="stylesheet" href="/public/workspace.css">
 </head>
 <body>
   <header>
@@ -232,6 +234,7 @@ function page() {
         <button id="tabCalendar">交付日历</button>
         <button id="tabDashboard">风险仪表盘</button>
         <button id="tabCalibration">校准库管理</button>
+        <button id="tabWorkspace">负责人工作台</button>
       </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
@@ -324,6 +327,14 @@ function page() {
         </div>
         <div class="grid" id="calibrationRules"></div>
       </div>
+    </section>
+    <section id="workspaceSection" style="display:none">
+      <div class="ws-section-header" style="margin-bottom:14px">
+        <h2 style="margin:0">负责人工作台</h2>
+        <div class="meta">按负责人聚合展示名下模型、待处理帆索任务、近期待交付模型和最近校准记录</div>
+      </div>
+      <div id="wsOwnerList" class="ws-owners-grid"></div>
+      <div id="wsWorkspace" style="display:none"></div>
     </section>
   </main>
   <script>
@@ -563,11 +574,14 @@ function page() {
       document.querySelector('#listSectionRight').style.display = 'none';
       document.querySelector('#calendarSection').style.display = 'none';
       document.querySelector('#kanbanSection').style.display = 'none';
+      document.querySelector('#workspaceSection').style.display = 'none';
       detailSection.style.display = '';
       document.querySelector('#main').classList.add('detail-view');
       document.querySelector('#tabList').classList.remove('active');
       document.querySelector('#tabKanban').classList.remove('active');
       document.querySelector('#tabCalendar').classList.remove('active');
+      document.querySelector('#tabCalibration').classList.remove('active');
+      document.querySelector('#tabWorkspace').classList.remove('active');
     }
 
     function goBack() {
@@ -575,6 +589,8 @@ function page() {
         switchView('calendar');
       } else if (previousView === 'kanban') {
         switchView('kanban');
+      } else if (previousView === 'workspace') {
+        switchView('workspace');
       } else {
         switchView('list');
       }
@@ -729,11 +745,13 @@ function page() {
       document.querySelector('#tabKanban').classList.toggle('active', view === 'kanban');
       document.querySelector('#tabCalendar').classList.toggle('active', view === 'calendar');
       document.querySelector('#tabCalibration').classList.toggle('active', view === 'calibration');
+      document.querySelector('#tabWorkspace').classList.toggle('active', view === 'workspace');
       document.querySelector('#listSection').style.display = view === 'list' ? '' : 'none';
       document.querySelector('#listSectionRight').style.display = view === 'list' ? '' : 'none';
       document.querySelector('#calendarSection').style.display = view === 'calendar' ? '' : 'none';
       document.querySelector('#kanbanSection').style.display = view === 'kanban' ? '' : 'none';
       calibrationSection.style.display = view === 'calibration' ? '' : 'none';
+      document.querySelector('#workspaceSection').style.display = view === 'workspace' ? '' : 'none';
       detailSection.style.display = 'none';
       document.querySelector('#main').classList.remove('detail-view');
       document.querySelector('#main').classList.toggle('calendar-view', view === 'calendar');
@@ -746,6 +764,10 @@ function page() {
         }
       } else if (view === 'calibration') {
         loadCalibrationRules();
+      } else if (view === 'workspace') {
+        if (window.initWorkspace) {
+          initWorkspace();
+        }
       } else {
         renderList();
       }
@@ -756,6 +778,7 @@ function page() {
       else if (currentView === 'calendar') renderCalendar();
       else if (currentView === 'kanban' && window.refreshKanban) refreshKanban();
       else if (currentView === 'calibration') renderCalibrationRules();
+      else if (currentView === 'workspace' && window.refreshWorkspace) refreshWorkspace();
     }
 
     async function loadCalibrationRules() {
@@ -839,6 +862,8 @@ function page() {
       items = await api('/api/items');
       if (currentView === 'kanban' && window.refreshKanban) {
         await refreshKanban();
+      } else if (currentView === 'workspace' && window.refreshWorkspace) {
+        await refreshWorkspace();
       } else {
         render();
       }
@@ -854,6 +879,7 @@ function page() {
     document.querySelector('#tabKanban').onclick = () => switchView('kanban');
     document.querySelector('#tabCalendar').onclick = () => switchView('calendar');
     document.querySelector('#tabCalibration').onclick = () => switchView('calibration');
+    document.querySelector('#tabWorkspace').onclick = () => switchView('workspace');
     calAddBtn.onclick = () => openCalibrationForm();
     calMaterialFilter.onchange = loadCalibrationRules;
     calScaleFilter.onchange = loadCalibrationRules;
@@ -870,24 +896,41 @@ function page() {
       return m ? decodeURIComponent(m[1]) : null;
     }
 
+    function getWorkspaceOwnerFromPath() {
+      const m = location.pathname.match(new RegExp('^/workspace/([^/]+)$'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+
     let handlingPopState = false;
 
     window.addEventListener('popstate', () => {
       handlingPopState = true;
       const id = getDetailIdFromPath();
+      const owner = getWorkspaceOwnerFromPath();
       if (id && currentView !== 'detail') {
         showDetailView();
         loadDetail(id).then(() => { handlingPopState = false; });
         return;
-      } else if (!id && currentView === 'detail') {
+      } else if (owner && currentView !== 'detail') {
+        switchView('workspace');
+        if (window.wsShowWorkspace) {
+          window.wsShowWorkspace(owner);
+        }
+        handlingPopState = false;
+        return;
+      } else if (!id && !owner && currentView === 'detail') {
         goBack();
+      } else if (!id && !owner && window.wsCurrentWorkspace) {
+        if (window.wsShowOwnerList) {
+          window.wsShowOwnerList();
+        }
       }
       handlingPopState = false;
     });
 
     const origGoBack = goBack;
     goBack = function() {
-      if (!handlingPopState && location.pathname.startsWith('/items/')) {
+      if (!handlingPopState && (location.pathname.startsWith('/items/') || location.pathname.startsWith('/workspace/'))) {
         history.pushState({}, '', '/');
       }
       origGoBack();
@@ -895,10 +938,14 @@ function page() {
 
     async function initFromUrl() {
       const id = getDetailIdFromPath();
+      const owner = getWorkspaceOwnerFromPath();
       if (id) {
         await itemsPromise;
         showDetailView();
         await loadDetail(id);
+      } else if (owner) {
+        await itemsPromise;
+        switchView('workspace');
       }
     }
 
@@ -906,7 +953,8 @@ function page() {
     const itemsPromise = load();
     initFromUrl();
   </script>
-  <script src="/public/kanban.js"></script>
+  <script src="/public/kanban.js?v=2"></script>
+  <script src="/public/workspace.js?v=2"></script>
 </body>
 </html>`;
 }
@@ -927,6 +975,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/") return html(res, page());
     const detailPageMatch = url.pathname.match(/^\/items\/([^/]+)$/);
     if (detailPageMatch && req.method === "GET") return html(res, page(detailPageMatch[1]));
+    const workspacePageMatch = url.pathname.match(/^\/workspace\/([^/]+)$/);
+    if (workspacePageMatch && req.method === "GET") return html(res, page());
     if (req.method === "GET" && url.pathname === "/import") return html(res, importPage());
     if (req.method === "GET" && url.pathname === "/dashboard") {
       const dashboardPath = join(__dirname, "public", "dashboard.html");
@@ -942,6 +992,9 @@ const server = http.createServer(async (req, res) => {
 
     const calibrationResult = await handleCalibrationApi(req, res);
     if (calibrationResult !== null) return;
+
+    const ownerResult = await handleOwnerApi(req, res, db);
+    if (ownerResult !== null) return;
 
     if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
 
