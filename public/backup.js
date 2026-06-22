@@ -64,12 +64,12 @@ function backupCardHtml(backup) {
     ? '<div class="card-actions">' +
         '<button class="secondary" data-diff="' + backup.id + '">🔍 预览差异</button>' +
         '<button data-download="' + backup.id + '">⬇️ 下载</button>' +
-        '<button class="warn" data-restore="' + backup.id + '">↩️ 恢复</button>' +
+        '<button class="warn" data-restore="' + backup.id + '" title="先预览差异再恢复">↩️ 预览差异并恢复</button>' +
       '</div>'
     : '<div class="card-actions">' +
         '<button class="secondary" disabled>🔍 预览差异</button>' +
         '<button disabled>⬇️ 下载</button>' +
-        '<button class="warn" disabled>↩️ 恢复</button>' +
+        '<button class="warn" disabled title="备份已损坏">↩️ 预览差异并恢复</button>' +
       '</div>';
 
   return '<article class="card">' +
@@ -114,7 +114,9 @@ function bindCardEvents() {
     btn.onclick = () => downloadBackup(btn.dataset.download);
   });
   document.querySelectorAll('[data-restore]').forEach(btn => {
-    btn.onclick = () => showRestoreModal(btn.dataset.restore);
+    btn.onclick = () => {
+      showDiffModal(btn.dataset.restore);
+    };
   });
 }
 
@@ -280,8 +282,9 @@ function renderDiffContent(diff) {
   const restoreBtn = document.getElementById('diffRestoreBtn');
   if (restoreBtn) {
     restoreBtn.onclick = () => {
+      const backupId = currentDiffBackup.id;
       closeDiffModal();
-      showRestoreModal(currentDiffBackup.id);
+      showRestoreModal(backupId);
     };
   }
 }
