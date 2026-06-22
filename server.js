@@ -18,11 +18,27 @@ import {
   updateItem as dalUpdateItem,
   addItemLog as dalAddItemLog,
   createTask as dalCreateTask,
+  findItemById,
   TASK_STATUSES
 } from "./lib/data-access.js";
 
+import { globalRepository } from "./lib/data-repository.js";
+import {
+  CURRENT_SCHEMA_VERSION,
+  detectDataVersion,
+  loadMigrationState,
+  readRawDatabase
+} from "./lib/migration-registry.js";
+import {
+  runSystemHealthCheck,
+  healthCheckPageHtml,
+  handleHealthApi,
+  handleMigrationsApi,
+  handleSnapshotsApi
+} from "./lib/startup-health.js";
+import { listSnapshots } from "./lib/backup-snapshot.js";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbPath = join(__dirname, "data", "model-rigging-calibration.json");
 const port = Number(process.env.PORT || 3038);
 const seed = {
   "items": [
@@ -58,28 +74,48 @@ const stages = ["待检查","校准中","待复核","已交付"];
 const statLabels = ["待检查","校准中","待复核","已交付"];
 const extraFields = [["position","索具位置"],["tension","松紧状态"],["note","调整备注"]];
 
-async function loadDb() {
-  if (!existsSync(dbPath)) {
-    await mkdir(dirname(dbPath), { recursive: true });
-    await writeFile(dbPath, JSON.stringify(seed, null, 2));
+const VIRTUAL_ADMIN_AUTH = {
+  isAuthenticated: true,
+  isAdmin: true,
+  user: {
+    username: "system",
+    displayName: "系统",
+    role: "admin",
+    owner: null
   }
-  return JSON.parse(await readFile(dbPath, "utf8"));
+};
+
+async function loadDb() {
+  return await dalLoadDb();
 }
-async function saveDb(db) { await writeFile(dbPath, JSON.stringify(db, null, 2)); }
+
+async function saveDb(db) {
+  return await dalSaveDb(db);
+}
+
 async function body(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
 }
+
 function send(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(data, null, 2));
 }
+
+function sendError(res, status, error) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ error }, null, 2));
+}
+
 function html(res, text) {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(text);
 }
+
 function newId() { return "MR-" + Date.now(); }
+
 function computeStats(items) {
   const stats = Object.fromEntries(statLabels.map(label => [label, 0]));
   for (const item of items) {
@@ -87,6 +123,7 @@ function computeStats(items) {
   }
   return stats;
 }
+
 function filterByDateRange(items, start, end) {
   return items.filter(item => {
     if (!item.dueDate) return false;
@@ -96,6 +133,7 @@ function filterByDateRange(items, start, end) {
     return true;
   });
 }
+
 function summarize(item) {
   const logCount = (item.logs || []).length + (item.tasks || []).reduce((n, t) => n + (t.logs || []).length, 0);
   return { ...item, logCount };
@@ -195,6 +233,7 @@ function page() {
         <button id="tabKanban">任务看板</button>
         <button id="tabCalendar">交付日历</button>
         <button id="tabDashboard">风险仪表盘</button>
+        <button id="tabHealth" title="系统自检 & 迁移管理">🛠️ 系统自检</button>
       </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
@@ -439,6 +478,10 @@ function page() {
       document.querySelector('#kanbanSection').style.display = view === 'kanban' ? '' : 'none';
       document.querySelector('#main').classList.toggle('calendar-view', view === 'calendar');
       document.querySelector('#main').classList.toggle('kanban-view', view === 'kanban');
+      if (view === 'health') {
+        location.href = '/health';
+        return;
+      }
       if (view === 'calendar') {
         renderCalendar();
       } else if (view === 'kanban') {
@@ -480,6 +523,7 @@ function page() {
     document.querySelector('#tabKanban').onclick = () => switchView('kanban');
     document.querySelector('#tabCalendar').onclick = () => switchView('calendar');
     document.querySelector('#tabDashboard').onclick = () => { location.href = '/dashboard'; };
+    document.querySelector('#tabHealth').onclick = () => { location.href = '/health'; };
     document.querySelector('#prevMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() - 1); renderCalendar(); };
     document.querySelector('#nextMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() + 1); renderCalendar(); };
     document.querySelector('#todayBtn').onclick = () => { viewDate = new Date(); selectedDate = formatDate(new Date()); renderCalendar(); };
@@ -492,115 +536,177 @@ function page() {
 </html>`;
 }
 
-const server = http.createServer(async (req, res) => {
+async function main() {
   try {
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    
-    if (url.pathname.startsWith('/public/')) {
-      const publicPath = join(__dirname, 'public');
-      const filePath = join(publicPath, url.pathname.slice('/public/'.length));
-      const served = await serveStatic(res, filePath);
-      if (served) return;
-    }
-    
-    const db = await loadDb();
+    const initResult = await globalRepository.initialize();
+    console.log(`📦 数据仓库初始化: version=v${initResult.version}, from=${initResult.from}` +
+      (initResult.migratedFrom !== undefined ? ` (migrated v${initResult.migratedFrom}→v${initResult.version})` : ""));
 
-    if (req.method === "GET" && url.pathname === "/") return html(res, page());
-    if (req.method === "GET" && url.pathname === "/import") return html(res, importPage());
-    if (req.method === "GET" && url.pathname === "/dashboard") {
-      const dashboardPath = join(__dirname, "public", "dashboard.html");
-      const served = await serveStatic(res, dashboardPath);
-      if (served) return;
-    }
-    
-    const taskResult = await handleTasksApi(req, res, db);
-    if (taskResult !== null) return;
+    const bootHealth = await runSystemHealthCheck();
+    const ok = bootHealth.overallStatus === "ok";
+    const cnt = bootHealth.checks.filter(c => c.status === "ok").length;
+    console.log(`🔬 启动自检: ${ok ? "OK" : "WARN"} (schema v${bootHealth.schemaVersion}/v${bootHealth.expectedVersion}, ${cnt}/${bootHealth.checks.length} checks)`);
 
-    const riskResult = await handleRiskApi(req, res, db);
-    if (riskResult !== null) return;
-
-    if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
-    if (req.method === "GET" && url.pathname === "/api/items/calendar") {
-      const start = url.searchParams.get("start");
-      const end = url.searchParams.get("end");
-      const filtered = filterByDateRange(db.items, start, end);
-      return send(res, 200, filtered.map(summarize));
-    }
-    if (req.method === "POST" && url.pathname === "/api/items") {
-      const input = await body(req);
-      const item = { id: newId(), ...input, logs: [{ at: new Date().toISOString(), step: "建档", note: "创建模型" }] };
-      item.tasks = [];
-      db.items.unshift(item);
-      await saveDb(db);
-      return send(res, 201, item);
-    }
-    const patch = url.pathname.match(/^\/api\/items\/([^/]+)$/);
-    if (patch && req.method === "PATCH") {
-      const item = db.items.find(x => x.id === patch[1] || x.code === patch[1]);
-      if (!item) return send(res, 404, { error: "item_not_found" });
-      Object.assign(item, await body(req));
-      item.logs ||= [];
-      item.logs.push({ at: new Date().toISOString(), step: "状态", note: "更新为" + item.status });
-      await saveDb(db);
-      return send(res, 200, item);
-    }
-    const log = url.pathname.match(/^\/api\/items\/([^/]+)\/logs$/);
-    if (log && req.method === "POST") {
-      const item = db.items.find(x => x.id === log[1] || x.code === log[1]);
-      if (!item) return send(res, 404, { error: "item_not_found" });
-      const input = await body(req);
-      item.logs ||= [];
-      item.logs.push({ at: new Date().toISOString(), step: input.step || "记录", note: input.note || "" });
-      await saveDb(db);
-      return send(res, 201, item);
-    }
-    const action = url.pathname.match(/^\/api\/items\/([^/]+)\/action$/);
-    if (action && req.method === "POST") {
-      const item = db.items.find(x => x.id === action[1] || x.code === action[1]);
-      if (!item) return send(res, 404, { error: "item_not_found" });
-      const input = await body(req);
-      item.logs ||= [];
-      item.tasks ||= [];
-      item.tasks.push({ id: "T-" + Date.now(), position: input.position, tension: input.tension, status: "待检查", logs: [{ at: new Date().toISOString(), note: input.note || "新增帆索任务" }] });
-      item.status = "校准中";
-      item.logs.push({ at: new Date().toISOString(), step: "帆索", note: input.position + " · " + input.tension });
-      await saveDb(db);
-      return send(res, 201, item);
-    }
-    if (req.method === "GET" && url.pathname === "/api/stats") return send(res, 200, computeStats(db.items));
-
-    if (req.method === "POST" && url.pathname === "/api/import/preview") {
-      const contentType = req.headers["content-type"] || "";
-      const boundary = extractBoundary(contentType);
-      if (!boundary) return send(res, 400, { error: "invalid_multipart" });
-
-      const parts = await parseMultipart(req, boundary);
-      const filePart = parts.find(p => p.isFile && p.name === "file");
-      if (!filePart) return send(res, 400, { error: "no_file" });
-      if (filePart.data.length === 0) return send(res, 400, { error: "empty_file" });
-
-      const parsed = parseBuffer(filePart.data, filePart.filename || "");
-      const validated = validateAll(parsed, db.items);
-      validated.rows.forEach(r => {
-        r._taskPreview = generateTaskSummary(r.normalized);
-      });
-
-      return send(res, 200, validated);
+    if (!ok) {
+      const warns = bootHealth.checks.filter(c => c.status !== "ok");
+      for (const w of warns) console.log(`   ⚠️  ${w.name}: ${w.detail || w.status}`);
     }
 
-    if (req.method === "POST" && url.pathname === "/api/import/commit") {
-      const input = await body(req);
-      if (!input.rows || !Array.isArray(input.rows)) {
-        return send(res, 400, { error: "invalid_rows" });
+    const server = http.createServer(async (req, res) => {
+      try {
+        req.auth = VIRTUAL_ADMIN_AUTH;
+
+        const url = new URL(req.url, `http://${req.headers.host}`);
+
+        if (url.pathname.startsWith('/public/')) {
+          const publicPath = join(__dirname, 'public');
+          const filePath = join(publicPath, url.pathname.slice('/public/'.length));
+          const served = await serveStatic(res, filePath);
+          if (served) return;
+        }
+
+        const pathname = url.pathname;
+
+        if (req.method === "GET" && pathname === "/health") {
+          const health = await runSystemHealthCheck();
+          const state = await loadMigrationState();
+          const snapshots = await listSnapshots();
+          return html(res, healthCheckPageHtml(health, state, snapshots.slice(0, 20)));
+        }
+
+        if (pathname.startsWith("/api/health")) {
+          const handled = await handleHealthApi(req, res);
+          if (handled !== null && handled !== undefined) return;
+        }
+
+        if (pathname.startsWith("/api/migrations")) {
+          const handled = await handleMigrationsApi(req, res);
+          if (handled !== null && handled !== undefined) return;
+        }
+
+        if (pathname.startsWith("/api/snapshots")) {
+          const handled = await handleSnapshotsApi(req, res);
+          if (handled !== null && handled !== undefined) return;
+        }
+
+        const db = await loadDb();
+
+        if (req.method === "GET" && pathname === "/") return html(res, page());
+        if (req.method === "GET" && pathname === "/import") return html(res, importPage());
+        if (req.method === "GET" && pathname === "/dashboard") {
+          const dashboardPath = join(__dirname, "public", "dashboard.html");
+          const served = await serveStatic(res, dashboardPath);
+          if (served) return;
+        }
+
+        const taskResult = await handleTasksApi(req, res, db);
+        if (taskResult !== null) return;
+
+        const riskResult = await handleRiskApi(req, res, db);
+        if (riskResult !== null) return;
+
+        if (req.method === "GET" && pathname === "/api/items") {
+          return send(res, 200, getAllItems(db));
+        }
+        if (req.method === "GET" && pathname === "/api/items/calendar") {
+          const start = url.searchParams.get("start");
+          const end = url.searchParams.get("end");
+          const allItems = getAllItems(db);
+          const filtered = filterByDateRange(allItems, start, end);
+          return send(res, 200, filtered.map(summarize));
+        }
+        if (req.method === "POST" && pathname === "/api/items") {
+          const input = await body(req);
+          const item = await dalCreateItem(db, input);
+          return send(res, 201, item);
+        }
+        const patch = pathname.match(/^\/api\/items\/([^/]+)$/);
+        if (patch && req.method === "PATCH") {
+          const itemId = patch[1];
+          const updates = await body(req);
+          try {
+            const item = await dalUpdateItem(db, itemId, updates);
+            return send(res, 200, item);
+          } catch (e) {
+            if (e.message === "item_not_found") return sendError(res, 404, "item_not_found");
+            throw e;
+          }
+        }
+        const log = pathname.match(/^\/api\/items\/([^/]+)\/logs$/);
+        if (log && req.method === "POST") {
+          const itemId = log[1];
+          const input = await body(req);
+          try {
+            const item = await dalAddItemLog(db, itemId, input.step, input.note);
+            return send(res, 201, item);
+          } catch (e) {
+            if (e.message === "item_not_found") return sendError(res, 404, "item_not_found");
+            throw e;
+          }
+        }
+        const action = pathname.match(/^\/api\/items\/([^/]+)\/action$/);
+        if (action && req.method === "POST") {
+          const itemId = action[1];
+          const input = await body(req);
+          try {
+            const { item } = await dalCreateTask(db, itemId, input);
+            return send(res, 201, item);
+          } catch (e) {
+            if (e.message === "item_not_found") return sendError(res, 404, "item_not_found");
+            throw e;
+          }
+        }
+        if (req.method === "GET" && pathname === "/api/stats") {
+          const allItems = getAllItems(db);
+          return send(res, 200, computeStats(allItems));
+        }
+
+        if (req.method === "POST" && pathname === "/api/import/preview") {
+          const contentType = req.headers["content-type"] || "";
+          const boundary = extractBoundary(contentType);
+          if (!boundary) return sendError(res, 400, "invalid_multipart");
+
+          const parts = await parseMultipart(req, boundary);
+          const filePart = parts.find(p => p.isFile && p.name === "file");
+          if (!filePart) return sendError(res, 400, "no_file");
+          if (filePart.data.length === 0) return sendError(res, 400, "empty_file");
+
+          const parsed = parseBuffer(filePart.data, filePart.filename || "");
+          const allItems = getAllItems(db);
+          const validated = validateAll(parsed, allItems);
+          validated.rows.forEach(r => {
+            r._taskPreview = generateTaskSummary(r.normalized);
+          });
+
+          return send(res, 200, validated);
+        }
+
+        if (req.method === "POST" && pathname === "/api/import/commit") {
+          const input = await body(req);
+          if (!input.rows || !Array.isArray(input.rows)) {
+            return sendError(res, 400, "invalid_rows");
+          }
+          const result = await commitImport(db, saveDb, input.rows);
+          return send(res, 200, result);
+        }
+
+        sendError(res, 404, "not_found");
+      } catch (error) {
+        console.error("Server error:", error);
+        sendError(res, 500, error.message);
       }
-      const result = await commitImport(db, saveDb, input.rows);
-      return send(res, 200, result);
-    }
+    });
 
-    send(res, 404, { error: "not_found" });
-  } catch (error) {
-    console.error(error);
-    send(res, 500, { error: error.message });
+    server.listen(port, () => {
+      console.log(`⛵ 古船模型帆索校准系统已启动: http://localhost:${port}`);
+      console.log(`   系统自检页: http://localhost:${port}/health`);
+      console.log(`   当前 schemaVersion: v${CURRENT_SCHEMA_VERSION}`);
+    });
+
+  } catch (err) {
+    console.error("❌ 启动失败:", err);
+    process.exit(1);
   }
-});
-server.listen(port, () => console.log("古船模型帆索校准 listening on http://localhost:" + port));
+}
+
+main();
