@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "timestamp": "2026-06-22T03:24:05.121Z",
+  "stats": {
+    "totalItems": 12,
+    "normalizedItems": 12,
+    "addedOwnerField": 1,
+    "addedIdField": 1,
+    "addedTasksField": 0,
+    "addedLogsField": 0,
+    "addedStatusField": 0,
+    "normalizedTasks": 0
+  },
+  "notes": "Migration v1: Normalized item structure for auth and audit system"
+}

@@ -1,0 +1,42 @@
+[
+  {
+    "username": "admin",
+    "passwordHash": "9f753d11bba16a615cdf7bfd45155510eb707be64488ceaf3e061b4e83073d6b",
+    "displayName": "系统管理员",
+    "role": "admin",
+    "owner": null,
+    "createdAt": "2026-06-22T03:27:48.642Z"
+  },
+  {
+    "username": "zhouning",
+    "passwordHash": "bbb626a5bf1a0ceeb365f621f9ad2ecfcd1538f4d857155b6c2370816779e592",
+    "displayName": "周宁",
+    "role": "user",
+    "owner": "周宁",
+    "createdAt": "2026-06-22T03:27:48.642Z"
+  },
+  {
+    "username": "zhaoliu",
+    "passwordHash": "e2d525d792d905fe49850f631cdd21cc94b345fac9446ee07b8547be2d8e0c92",
+    "displayName": "赵六",
+    "role": "user",
+    "owner": "赵六",
+    "createdAt": "2026-06-22T03:27:48.642Z"
+  },
+  {
+    "username": "zhangsan",
+    "passwordHash": "a15ad306c029544984c10f1858930b76278474fb62315155f42fd3de3801e5e7",
+    "displayName": "张三",
+    "role": "user",
+    "owner": "张三",
+    "createdAt": "2026-06-22T03:27:48.642Z"
+  },
+  {
+    "username": "lisi",
+    "passwordHash": "5a2212da31449bacea38d5e10a9f395ec4e220530b4f75fff583746f7e8dbccf",
+    "displayName": "李四",
+    "role": "user",
+    "owner": "李四",
+    "createdAt": "2026-06-22T03:27:48.642Z"
+  }
+]

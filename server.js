@@ -14,23 +14,47 @@ import { handleCalibrationApi } from "./lib/calibration-api.js";
 import { handleOwnerApi } from "./lib/owner-api.js";
 import { handleBackupApi } from "./lib/backup-api.js";
 import {
-  loadDb as dalLoadDb,
-  saveDb as dalSaveDb,
-  getAllItems,
-  createItem as dalCreateItem,
-  updateItem as dalUpdateItem,
-  addItemLog as dalAddItemLog,
-  createTask as dalCreateTask,
-  TASK_STATUSES
-} from "./lib/data-access.js";
+  authMiddleware,
+  handleAuthApi,
+  extractTokenFromRequest
+} from "./lib/auth.js";
+import { handleAuditApi, AUDIT_ACTIONS, writeAuditLog } from "./lib/audit.js";
+import {
+  filterItemsByOwner,
+  filterTasksByOwner,
+  filterOwnersForSelection,
+  canViewItem,
+  canEditItem,
+  canCreateItem,
+  canChangeItemOwner,
+  isAdmin,
+  getCurrentOwner
+} from "./lib/permissions.js";
+import { runMigrationIfNeeded, getClientIp } from "./lib/migration.js";
 import {
   prepareExportData,
   generateCsvWithBom,
   getExportColumnLabels,
-  getUniqueOwners,
+  getUniqueOwners as getUniqueOwnersFromItems,
   MODEL_STATUSES,
   formatDate
 } from "./lib/calendar-export.js";
+import {
+  loadDb,
+  saveDb,
+  getAllItems,
+  getAllTasks,
+  findItemById,
+  createItem,
+  createTask,
+  updateItem,
+  addItemLog,
+  updateTaskStatus,
+  addTaskLog,
+  getUniqueOwners,
+  getUniqueTensions,
+  TASK_STATUSES
+} from "./lib/data-access.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dbPath = join(__dirname, "data", "model-rigging-calibration.json");
@@ -69,28 +93,33 @@ const stages = ["待检查","校准中","待复核","已交付"];
 const statLabels = ["待检查","校准中","待复核","已交付"];
 const extraFields = [["position","索具位置"],["tension","松紧状态"],["note","调整备注"]];
 
-async function loadDb() {
+async function ensureDb() {
   if (!existsSync(dbPath)) {
     await mkdir(dirname(dbPath), { recursive: true });
     await writeFile(dbPath, JSON.stringify(seed, null, 2));
   }
-  return JSON.parse(await readFile(dbPath, "utf8"));
 }
-async function saveDb(db) { await writeFile(dbPath, JSON.stringify(db, null, 2)); }
-async function body(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
-}
+
 function send(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(data, null, 2));
+  return true;
 }
+
+function sendError(res, status, error) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ error }, null, 2));
+  return true;
+}
+
 function html(res, text) {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(text);
+  return true;
 }
+
 function newId() { return "MR-" + Date.now(); }
+
 function computeStats(items) {
   const stats = Object.fromEntries(statLabels.map(label => [label, 0]));
   for (const item of items) {
@@ -98,6 +127,7 @@ function computeStats(items) {
   }
   return stats;
 }
+
 function filterByDateRange(items, start, end) {
   return items.filter(item => {
     if (!item.dueDate) return false;
@@ -107,10 +137,12 @@ function filterByDateRange(items, start, end) {
     return true;
   });
 }
+
 function summarize(item) {
   const logCount = (item.logs || []).length + (item.tasks || []).reduce((n, t) => n + (t.logs || []).length, 0);
   return { ...item, logCount };
 }
+
 function getItemWithTimeline(db, id) {
   const item = db.items.find(x => x.id === id || x.code === id);
   if (!item) return null;
@@ -180,1298 +212,1122 @@ async function serveStatic(res, filePath) {
   }
 }
 
-function page() {
+function loginPageHtml() {
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>古船模型帆索校准</title>
+  <title>登录 - 古船模型帆索校准</title>
   <style>
-    :root { --bg:#f1f3ef; --panel:#fff; --ink:#20241f; --muted:#687066; --line:#d4ddd0; --accent:#526f43; --warn:#9b4937; --calendar-bg:#fafbf9; --calendar-hover:#e6ebe2; --calendar-today:#d6e3cc; --calendar-due:#c4d6b4; }
-    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font-family:Arial,"PingFang SC",sans-serif; }
-    header { padding:22px 28px; background:#fff; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:16px; align-items:center; flex-wrap:wrap; }
-    .header-left { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-    .view-tabs { display:flex; gap:4px; background:var(--bg); padding:4px; border-radius:8px; }
-    .view-tabs button { background:transparent; color:var(--muted); padding:6px 14px; border-radius:6px; font-weight:600; }
-    .view-tabs button.active { background:var(--panel); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08); }
-    h1 { margin:0; font-size:26px; } h2 { margin:0 0 12px; font-size:18px; } main { display:grid; grid-template-columns:380px 1fr; gap:22px; padding:22px 28px; }
-    main.calendar-view { grid-template-columns:1fr; }
-    form,.panel,.card,.stat { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
-    label { display:block; margin:10px 0 5px; color:var(--muted); font-size:13px; } input,select,textarea { width:100%; border:1px solid var(--line); border-radius:6px; padding:9px; font:inherit; background:#fff; } textarea { min-height:68px; }
-    button { border:0; border-radius:6px; background:var(--accent); color:#fff; padding:10px 13px; font-weight:700; cursor:pointer; } button.secondary { background:#69736a; }
-    button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
-    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-bottom:14px; } .stat strong { display:block; font-size:24px; }
-    .toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; align-items:center; } .toolbar select,.toolbar input { width:auto; min-width:160px; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; } .card { display:grid; gap:8px; }
-    .meta { color:var(--muted); font-size:13px; } .pill { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:3px 8px; font-size:12px; }
-    .logs { border-top:1px solid var(--line); padding-top:8px; max-height:90px; overflow:auto; } .warn { color:var(--warn); font-weight:700; }
-    .empty { text-align:center; padding:60px 20px; color:var(--muted); }
-    .empty-icon { font-size:56px; margin-bottom:12px; opacity:.5; }
-    .empty h3 { margin:0 0 8px; color:var(--ink); font-size:18px; }
-    .calendar-panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:20px; }
-    .calendar-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
-    .calendar-header h2 { margin:0; font-size:20px; }
-    .calendar-nav { display:flex; gap:8px; }
-    .calendar-nav button { padding:6px 12px; font-size:14px; }
-    .calendar-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; background:var(--line); border-radius:6px; overflow:hidden; }
-    .calendar-cell { background:var(--calendar-bg); min-height:96px; padding:8px; cursor:pointer; transition:background .15s; display:flex; flex-direction:column; }
-    .calendar-cell:hover { background:var(--calendar-hover); }
-    .calendar-cell.other-month { opacity:.35; }
-    .calendar-cell.today { background:var(--calendar-today); }
-    .calendar-cell.selected { background:var(--accent); color:#fff; }
-    .calendar-cell.selected .day-number { color:#fff; }
-    .calendar-cell.selected .meta { color:#e6ebe2; }
-    .day-number { font-weight:600; font-size:15px; margin-bottom:4px; }
-    .day-dots { display:flex; flex-wrap:wrap; gap:3px; margin-top:auto; }
-    .day-dot { width:6px; height:6px; border-radius:50%; background:var(--accent); }
-    .day-count { font-size:11px; color:var(--muted); margin-top:2px; }
-    .calendar-cell.selected .day-count { color:#e6ebe2; }
-    .weekday { background:var(--panel); padding:10px 8px; text-align:center; font-size:13px; color:var(--muted); font-weight:600; }
-    .calendar-detail { margin-top:20px; }
-    .calendar-detail-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
-    .calendar-detail-header h3 { margin:0; font-size:16px; }
-    .due-tag { display:inline-block; background:var(--calendar-due); color:var(--accent); padding:2px 8px; border-radius:4px; font-size:12px; font-weight:600; margin-left:6px; }
-    .card .due-highlight { color:var(--warn); font-weight:700; }
-    .import-btn { background:#2d5a8e; }
-    main.kanban-view { grid-template-columns: 1fr; }
-    main.detail-view { grid-template-columns: 1fr; }
-    .detail-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
-    .detail-header h2 { margin: 0; font-size: 22px; }
-    .detail-back-btn { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 8px 14px; font-size: 14px; }
-    .detail-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
-    .detail-meta-item { background: var(--calendar-bg); padding: 10px 12px; border-radius: 6px; }
-    .detail-meta-item .meta-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-    .detail-meta-item .meta-value { font-weight: 600; font-size: 15px; }
-    .timeline-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
-    .timeline-filter-btn { background: var(--calendar-bg); color: var(--muted); border: 1px solid var(--line); padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; }
-    .timeline-filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .timeline { position: relative; padding-left: 28px; }
-    .timeline::before { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; background: var(--line); }
-    .timeline-item { position: relative; padding-bottom: 20px; }
-    .timeline-item::before { content: ''; position: absolute; left: -24px; top: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); }
-    .timeline-item.type-建档::before { border-color: #2d5a8e; background: #e6eef7; }
-    .timeline-item.type-状态::before { border-color: #9b4937; background: #f5e6e2; }
-    .timeline-item.type-帆索::before { border-color: #526f43; background: #e6ebe2; }
-    .timeline-item.type-备注::before { border-color: #8b6914; background: #f7f0db; }
-    .timeline-item.type-任务::before { border-color: #6b5b95; background: #ece9f2; }
-    .timeline-time { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-    .timeline-type { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
-    .timeline-type.建档 { background: #e6eef7; color: #2d5a8e; }
-    .timeline-type.状态 { background: #f5e6e2; color: #9b4937; }
-    .timeline-type.帆索 { background: #e6ebe2; color: #526f43; }
-    .timeline-type.备注 { background: #f7f0db; color: #8b6914; }
-    .timeline-type.任务 { background: #ece9f2; color: #6b5b95; }
-    .timeline-note { font-size: 14px; color: var(--ink); line-height: 1.5; }
-    .timeline-task-info { font-size: 12px; color: var(--muted); margin-top: 4px; }
-    .timeline-empty { text-align: center; padding: 40px 20px; }
-    .timeline-empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
-    .timeline-empty h3 { margin: 0 0 8px; font-size: 16px; color: var(--ink); }
-    .timeline-empty p { margin: 0; font-size: 13px; color: var(--muted); }
-    .export-panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:20px; margin-top:20px; }
-    .export-panel-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
-    .export-panel-header h2 { margin:0; font-size:18px; }
-    .export-filters { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-bottom:16px; }
-    .export-filter-group label { display:block; margin-bottom:6px; color:var(--muted); font-size:13px; font-weight:600; }
-    .export-filter-group .date-range { display:flex; gap:6px; align-items:center; }
-    .export-filter-group .date-range input { flex:1; min-width:0; }
-    .checkbox-group { display:flex; flex-wrap:wrap; gap:10px; padding:8px; background:var(--calendar-bg); border-radius:6px; max-height:140px; overflow-y:auto; }
-    .checkbox-item { display:flex; align-items:center; gap:5px; cursor:pointer; font-size:13px; padding:3px 8px; border-radius:4px; }
-    .checkbox-item:hover { background:var(--calendar-hover); }
-    .checkbox-item input { width:auto; margin:0; }
-    .export-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
-    .export-actions .meta { margin-left:8px; }
-    .export-preview-table { width:100%; border-collapse:collapse; font-size:13px; }
-    .export-preview-table th { background:var(--calendar-bg); padding:10px 12px; text-align:left; font-weight:600; border-bottom:2px solid var(--line); position:sticky; top:0; }
-    .export-preview-table td { padding:8px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
-    .export-preview-table tr:hover td { background:var(--calendar-hover); }
-    .export-preview-container { max-height:400px; overflow:auto; border:1px solid var(--line); border-radius:6px; }
-    .export-preview-empty { text-align:center; padding:40px 20px; color:var(--muted); }
-    .export-preview-empty-icon { font-size:40px; margin-bottom:10px; opacity:.5; }
-    .btn-quick { background:var(--calendar-bg); color:var(--ink); border:1px solid var(--line); padding:6px 10px; font-size:12px; font-weight:600; }
-    .btn-quick:hover { background:var(--calendar-hover); }
-    .export-count-pill { display:inline-block; background:var(--accent); color:#fff; padding:3px 10px; border-radius:999px; font-size:13px; font-weight:600; }
-    @media (max-width:900px){ header{display:block;padding:18px 16px;} main{grid-template-columns:1fr;padding:16px;} .calendar-cell{min-height:70px;padding:4px;} }
+    :root { --bg:#f1f3ef; --panel:#fff; --ink:#20241f; --muted:#687066; --line:#d4ddd0; --accent:#526f43; --warn:#9b4937; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font-family:Arial,"PingFang SC",sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .login-card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:36px 32px; width:100%; max-width:400px; box-shadow:0 8px 32px rgba(0,0,0,.08); }
+    .login-header { text-align:center; margin-bottom:28px; }
+    .login-icon { font-size:56px; margin-bottom:8px; }
+    h1 { margin:0; font-size:22px; } .subtitle { color:var(--muted); font-size:13px; margin-top:6px; }
+    label { display:block; margin:16px 0 6px; color:var(--muted); font-size:13px; font-weight:600; }
+    input { width:100%; border:1px solid var(--line); border-radius:6px; padding:10px 12px; font:inherit; background:#fff; transition:border-color .15s; }
+    input:focus { outline:none; border-color:var(--accent); }
+    button { width:100%; border:0; border-radius:6px; background:var(--accent); color:#fff; padding:11px; font-weight:700; cursor:pointer; margin-top:24px; font-size:15px; transition:opacity .15s; }
+    button:hover { opacity:.9; } button:disabled { opacity:.5; cursor:not-allowed; }
+    .error-msg { background:#fdf0ed; color:var(--warn); border:1px solid #f1c9bf; border-radius:6px; padding:10px 12px; font-size:13px; margin-top:16px; display:none; }
+    .default-accounts { margin-top:24px; padding-top:20px; border-top:1px solid var(--line); }
+    .default-accounts h3 { margin:0 0 10px; font-size:13px; color:var(--muted); font-weight:600; }
+    .account-list { font-size:12px; color:var(--muted); line-height:1.8; }
+    .account-item { display:flex; justify-content:space-between; padding:4px 0; }
+    .account-item code { background:var(--bg); padding:1px 6px; border-radius:3px; font-family:monospace; color:var(--ink); }
+    .loading { display:inline-block; width:16px; height:16px; border:2px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin .8s linear infinite; vertical-align:middle; margin-right:6px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
   </style>
-  <link rel="stylesheet" href="/public/kanban.css">
-  <link rel="stylesheet" href="/public/workspace.css">
 </head>
 <body>
-  <header>
-    <div class="header-left">
-      <div><h1>古船模型帆索校准</h1><div class="meta">模型、帆索任务和校准记录串联</div></div>
-      <div class="view-tabs">
-        <button id="tabList" class="active">模型列表</button>
-        <button id="tabKanban">任务看板</button>
-        <button id="tabCalendar">交付日历</button>
-        <button id="tabDashboard">风险仪表盘</button>
-        <button id="tabCalibration">校准库管理</button>
-        <button id="tabWorkspace">负责人工作台</button>
-        <button id="tabBackup">备份与恢复</button>
+  <div class="login-card">
+    <div class="login-header">
+      <div class="login-icon">⛵</div>
+      <h1>古船模型帆索校准系统</h1>
+      <div class="subtitle">多用户协作与操作审计</div>
+    </div>
+    <form id="loginForm">
+      <label>用户名</label>
+      <input type="text" id="username" name="username" autocomplete="username" placeholder="请输入用户名" required>
+      <label>密码</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" placeholder="请输入密码" required>
+      <button type="submit" id="loginBtn">登 录</button>
+      <div class="error-msg" id="errorMsg"></div>
+    </form>
+    <div class="default-accounts">
+      <h3>默认账号（首次使用）</h3>
+      <div class="account-list">
+        <div class="account-item"><span>管理员：</span><code>admin / admin123</code></div>
+        <div class="account-item"><span>周宁：</span><code>zhouning / zhou123</code></div>
+        <div class="account-item"><span>赵六：</span><code>zhaoliu / zhao123</code></div>
+        <div class="account-item"><span>张三：</span><code>zhangsan / zhang123</code></div>
+        <div class="account-item"><span>李四：</span><code>lisi / li123</code></div>
       </div>
     </div>
-    <div style="display:flex; gap:8px; align-items:center;">
-      <button id="importBtn" class="import-btn">📥 批量导入</button>
-      <button id="reload">刷新</button>
-    </div>
-  </header>
-  <main id="main">
-    <section id="listSection">
-      <form id="createForm"><h2>新增模型</h2><div id="fields"></div><label>初始状态</label><select name="status">${stages.map(s => '<option>'+s+'</option>').join('')}</select><button>保存模型</button></form>
-      <form id="actionForm" style="margin-top:14px"><h2>新增帆索任务</h2><label>选择模型</label><select name="id" id="itemSelect"></select><div id="extraFields"></div><button>提交记录</button></form>
-    </section>
-    <section id="listSectionRight">
-      <div class="stats" id="stats"></div>
-      <div class="toolbar">
-        <select id="statusFilter"><option value="">全部状态</option>${stages.map(s => '<option>'+s+'</option>').join('')}</select>
-        <input id="search" placeholder="搜索编号或关键词">
-      </div>
-      <div class="panel"><h2>创建模型后可拆分帆索任务，逐条记录松紧状态、调整备注和完成时间。</h2><div class="grid" id="cards"></div></div>
-    </section>
-    <section id="calendarSection" style="display:none">
-      <div class="calendar-panel">
-        <div class="calendar-header">
-          <h2 id="calendarTitle"></h2>
-          <div class="calendar-nav">
-            <button class="ghost" id="prevMonth">← 上月</button>
-            <button class="ghost" id="todayBtn">今天</button>
-            <button class="ghost" id="nextMonth">下月 →</button>
-            <button id="toggleExportBtn" class="import-btn">📤 导出</button>
-          </div>
-        </div>
-        <div class="calendar-grid" id="calendarGrid"></div>
-      </div>
-      <div class="calendar-detail" id="calendarDetail"></div>
-      <div class="export-panel" id="exportPanel" style="display:none">
-        <div class="export-panel-header">
-          <h2>📤 导出交付日历</h2>
-          <button class="ghost" id="closeExportBtn">收起</button>
-        </div>
-        <div class="export-filters">
-          <div class="export-filter-group">
-            <label>交付日期范围</label>
-            <div class="date-range">
-              <input type="date" id="exportStartDate" placeholder="开始日期">
-              <span style="color:var(--muted)">至</span>
-              <input type="date" id="exportEndDate" placeholder="结束日期">
-            </div>
-            <div style="display:flex; gap:6px; margin-top:6px;">
-              <button type="button" class="btn-quick" data-range="thisWeek">本周</button>
-              <button type="button" class="btn-quick" data-range="nextWeek">下周</button>
-              <button type="button" class="btn-quick" data-range="thisMonth">本月</button>
-              <button type="button" class="btn-quick" data-range="nextMonth">下月</button>
-              <button type="button" class="btn-quick" id="clearDateRangeBtn">清除</button>
-            </div>
-          </div>
-          <div class="export-filter-group">
-            <label>状态筛选</label>
-            <div class="checkbox-group" id="exportStatusGroup"></div>
-          </div>
-          <div class="export-filter-group">
-            <label>负责人筛选</label>
-            <div class="checkbox-group" id="exportOwnerGroup"></div>
-          </div>
-        </div>
-        <div class="export-actions">
-          <button id="exportPreviewBtn">🔍 预览导出</button>
-          <button id="exportDownloadBtn" class="secondary" disabled>⬇️ 下载 CSV</button>
-          <span id="exportResultCount" class="meta" style="display:none"></span>
-        </div>
-        <div id="exportPreviewContainer"></div>
-      </div>
-    </section>
-    <section id="kanbanSection" style="display:none">
-      <div class="kanban-view">
-        <div class="kanban-stats" id="kanbanStats"></div>
-        <div class="kanban-toolbar">
-          <label>模型
-            <select id="kanbanModelFilter"><option value="">全部模型</option></select>
-          </label>
-          <label>负责人
-            <select id="kanbanOwnerFilter"><option value="">全部负责人</option></select>
-          </label>
-          <label>松紧状态
-            <select id="kanbanTensionFilter"><option value="">全部松紧</option></select>
-          </label>
-          <label class="date-range">交付日期
-            <div style="display:flex; gap:6px; align-items:center;">
-              <input type="date" id="kanbanDueStart" placeholder="开始">
-              <span style="color:var(--muted)">至</span>
-              <input type="date" id="kanbanDueEnd" placeholder="结束">
-            </div>
-          </label>
-          <button class="btn-clear" id="kanbanClearFilters">清除筛选</button>
-        </div>
-        <div class="kanban-board" id="kanbanBoard"></div>
-      </div>
-    </section>
-    <section id="detailSection" style="display:none">
-      <div class="panel">
-        <div class="detail-header">
-          <div>
-            <h2 id="detailTitle">模型详情</h2>
-            <div class="meta" id="detailSubtitle"></div>
-          </div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <button id="detailAddNoteBtn" class="secondary">追加备注</button>
-            <button class="detail-back-btn" id="detailBackBtn">← 返回</button>
-          </div>
-        </div>
-        <div class="detail-meta" id="detailMeta"></div>
-        <div class="timeline-filters" id="timelineFilters"></div>
-        <div id="timelineContainer"></div>
-      </div>
-    </section>
-    <section id="calibrationSection" style="display:none">
-      <div class="panel">
-        <div class="detail-header">
-          <div>
-            <h2>材料与松紧校准库</h2>
-            <div class="meta">维护不同帆索材料、模型比例和索具位置对应的建议松紧范围与调整建议</div>
-          </div>
-        </div>
-        <div class="toolbar">
-          <select id="calMaterialFilter"><option value="">全部材料</option></select>
-          <select id="calScaleFilter"><option value="">全部比例</option></select>
-          <input id="calSearch" placeholder="搜索关键词">
-          <button id="calAddBtn">+ 新增规则</button>
-        </div>
-        <div class="grid" id="calibrationRules"></div>
-      </div>
-    </section>
-    <section id="workspaceSection" style="display:none">
-      <div class="ws-section-header" style="margin-bottom:14px">
-        <h2 style="margin:0">负责人工作台</h2>
-        <div class="meta">按负责人聚合展示名下模型、待处理帆索任务、近期待交付模型和最近校准记录</div>
-      </div>
-      <div id="wsOwnerList" class="ws-owners-grid"></div>
-      <div id="wsWorkspace" style="display:none"></div>
-    </section>
-  </main>
+  </div>
   <script>
-    const fields = [["code","模型编号","text"],["shipType","船型","text"],["scale","比例","text"],["mastCount","桅杆数量","number"],["riggingMaterial","帆索材料","text"],["owner","负责人","text"],["dueDate","交付日期","date"]];
-    const stages = ["待检查","校准中","待复核","已交付"];
-    const extraFields = [["position","索具位置"],["tension","松紧状态"],["note","调整备注"]];
-    const weekdays = ["日","一","二","三","四","五","六"];
-    const createForm = document.querySelector('#createForm');
-    const actionForm = document.querySelector('#actionForm');
-    const cards = document.querySelector('#cards');
-    const statsEl = document.querySelector('#stats');
-    const itemSelect = document.querySelector('#itemSelect');
-    const calendarGrid = document.querySelector('#calendarGrid');
-    const calendarTitle = document.querySelector('#calendarTitle');
-    const calendarDetail = document.querySelector('#calendarDetail');
-    const detailSection = document.querySelector('#detailSection');
-    const detailTitle = document.querySelector('#detailTitle');
-    const detailSubtitle = document.querySelector('#detailSubtitle');
-    const detailMeta = document.querySelector('#detailMeta');
-    const timelineFilters = document.querySelector('#timelineFilters');
-    const timelineContainer = document.querySelector('#timelineContainer');
-    const detailBackBtn = document.querySelector('#detailBackBtn');
-    const detailAddNoteBtn = document.querySelector('#detailAddNoteBtn');
-    const calibrationSection = document.querySelector('#calibrationSection');
-    const calibrationRulesEl = document.querySelector('#calibrationRules');
-    const calMaterialFilter = document.querySelector('#calMaterialFilter');
-    const calScaleFilter = document.querySelector('#calScaleFilter');
-    const calSearch = document.querySelector('#calSearch');
-    const calAddBtn = document.querySelector('#calAddBtn');
-    let items = [];
-    let calibrationRules = [];
-    let currentView = 'list';
-    let previousView = 'list';
-    let viewDate = new Date();
-    let selectedDate = null;
-    let currentDetailItem = null;
-    let timelineFilter = '';
-    let editingCalibrationRule = null;
-    let exportFilters = { statuses: [], owners: [], startDate: '', endDate: '' };
-    let exportPreviewData = null;
-
-    async function api(path, options) {
-      const res = await fetch(path, options && options.body ? { ...options, headers:{ 'Content-Type':'application/json' } } : options);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '请求失败');
-      return data;
-    }
-
-    function renderForms() {
-      document.querySelector('#fields').innerHTML = fields.map(([key,label,type]) => '<label>'+label+'</label><input name="'+key+'" type="'+type+'" '+(key==='code'?'required':'')+'>').join('');
-      let extraHtml = '';
-      extraFields.forEach(([key,label]) => {
-        if (key === 'tension') {
-          extraHtml += '<label>' + label + ' <span id="tensionHint" class="meta" style="margin-left:6px"></span></label><input name="'+key+'" id="taskTensionInput">';
-        } else if (key === 'note') {
-          extraHtml += '<label>' + label + ' <span id="noteHint" class="meta" style="margin-left:6px"></span></label><textarea name="'+key+'" id="taskNoteInput" style="width:100%;border:1px solid var(--line);border-radius:6px;padding:9px;font:inherit;background:#fff;min-height:68px;"></textarea>';
-        } else {
-          extraHtml += '<label>'+label+'</label><input name="'+key+'" id="taskPositionInput">';
-        }
-      });
-      document.querySelector('#extraFields').innerHTML = extraHtml;
-      bindTaskFormCalibration();
-    }
-
-    function bindTaskFormCalibration() {
-      const positionInput = document.querySelector('#taskPositionInput');
-      const tensionInput = document.querySelector('#taskTensionInput');
-      const noteInput = document.querySelector('#taskNoteInput');
-      const tensionHint = document.querySelector('#tensionHint');
-      const noteHint = document.querySelector('#noteHint');
-      if (!positionInput) return;
-
-      async function tryMatchCalibration() {
-        const selectedItemId = itemSelect.value;
-        const selectedItem = items.find(it => (it.id || it.code) === selectedItemId);
-        const position = positionInput.value.trim();
-        if (!selectedItem || !position) {
-          if (tensionHint) tensionHint.textContent = '';
-          if (noteHint) noteHint.textContent = '';
-          return;
-        }
-        const material = selectedItem.riggingMaterial || '';
-        const scale = selectedItem.scale || '';
-        try {
-          const matched = await api('/api/calibration/match?material=' + encodeURIComponent(material) + '&scale=' + encodeURIComponent(scale) + '&position=' + encodeURIComponent(position));
-          if (matched) {
-            if (tensionHint) tensionHint.textContent = '（校准库建议：' + matched.suggestedTension + '，范围：' + (matched.tensionRange || '—') + '）';
-            if (noteHint) noteHint.textContent = '（已填入校准库建议模板，可修改）';
-            if (tensionInput && !tensionInput.value) tensionInput.value = matched.suggestedTension || '';
-            if (noteInput && !noteInput.value && matched.noteTemplate) noteInput.value = matched.noteTemplate;
-          } else {
-            if (tensionHint) tensionHint.textContent = '（无匹配校准规则，可手动录入）';
-            if (noteHint) noteHint.textContent = '';
-          }
-        } catch (e) {
-          if (tensionHint) tensionHint.textContent = '';
-          if (noteHint) noteHint.textContent = '';
-        }
-      }
-
-      positionInput.addEventListener('input', tryMatchCalibration);
-      itemSelect.addEventListener('change', tryMatchCalibration);
-    }
-
-    function isSameDay(d1, d2) {
-      return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
-    }
-
-    function formatDate(d) {
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return y + '-' + m + '-' + day;
-    }
-
-    function isOverdue(dueDate) {
-      if (!dueDate) return false;
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      return new Date(dueDate) < today;
-    }
-
-    function emptyHtml(icon, title, desc) {
-      return '<div class="empty"><div class="empty-icon">' + icon + '</div><h3>' + title + '</h3><div class="meta">' + desc + '</div></div>';
-    }
-
-    function formatDateTime(dateStr) {
-      if (!dateStr) return '';
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      const h = String(d.getHours()).padStart(2, '0');
-      const min = String(d.getMinutes()).padStart(2, '0');
-      return y + '-' + m + '-' + day + ' ' + h + ':' + min;
-    }
-
-    function timelineEmptyHtml() {
-      return '<div class="timeline-empty"><div class="timeline-empty-icon">📝</div><h3>暂无时间线记录</h3><p>该模型还没有任何操作记录</p></div>';
-    }
-
-    function timelineItemHtml(item) {
-      const taskInfo = item.source === 'task' && item.taskPosition
-        ? '<div class="timeline-task-info">任务：' + item.taskPosition + '</div>'
-        : '';
-      return '<div class="timeline-item type-' + item.type + '">' +
-        '<div class="timeline-time">' + formatDateTime(item.at) + '</div>' +
-        '<span class="timeline-type ' + item.type + '">' + item.type + '</span>' +
-        '<div class="timeline-note">' + (item.note || '') + '</div>' +
-        taskInfo +
-        '</div>';
-    }
-
-    function renderTimelineFilters(types) {
-      const allTypes = ['建档', '状态', '帆索', '备注', '任务'];
-      let html = '<span class="meta" style="margin-right:4px">类型筛选：</span>';
-      html += '<button class="timeline-filter-btn ' + (timelineFilter === '' ? 'active' : '') + '" data-filter="">全部</button>';
-      for (const type of allTypes) {
-        const hasType = types.includes(type);
-        if (hasType) {
-          html += '<button class="timeline-filter-btn ' + (timelineFilter === type ? 'active' : '') + '" data-filter="' + type + '">' + type + '</button>';
-        }
-      }
-      timelineFilters.innerHTML = html;
-      document.querySelectorAll('.timeline-filter-btn').forEach(btn => {
-        btn.onclick = () => {
-          timelineFilter = btn.dataset.filter;
-          renderTimeline();
-          renderTimelineFilters(currentDetailItem.timelineTypes || []);
-        };
-      });
-    }
-
-    function renderTimeline() {
-      if (!currentDetailItem || !currentDetailItem.timeline) {
-        timelineContainer.innerHTML = timelineEmptyHtml();
-        return;
-      }
-      let filtered = currentDetailItem.timeline;
-      if (timelineFilter) {
-        filtered = filtered.filter(t => t.type === timelineFilter);
-      }
-      if (filtered.length === 0) {
-        timelineContainer.innerHTML = timelineEmptyHtml();
-        return;
-      }
-      timelineContainer.innerHTML = '<div class="timeline">' +
-        filtered.map(item => timelineItemHtml(item)).join('') +
-        '</div>';
-    }
-
-    function renderDetailMeta(item) {
-      const metaItems = [
-        ['模型编号', item.code || item.id],
-        ['船型', item.shipType || ''],
-        ['比例', item.scale || ''],
-        ['桅杆数量', item.mastCount || ''],
-        ['帆索材料', item.riggingMaterial || ''],
-        ['负责人', item.owner || ''],
-        ['交付日期', item.dueDate || '未设置'],
-        ['当前状态', item.status || '']
-      ];
-      detailMeta.innerHTML = metaItems.map(([label, value]) =>
-        '<div class="detail-meta-item"><div class="meta-label">' + label + '</div><div class="meta-value">' + value + '</div></div>'
-      ).join('');
-    }
-
-    async function loadDetail(itemId) {
-      try {
-        const detail = await api('/api/items/' + encodeURIComponent(itemId));
-        currentDetailItem = detail;
-        timelineFilter = '';
-        renderDetailPage();
-        const id = currentDetailItem.id || currentDetailItem.code;
-        const targetUrl = '/items/' + encodeURIComponent(id);
-        if (!handlingPopState && location.pathname !== targetUrl) {
-          history.pushState({}, '', targetUrl);
-        }
-      } catch (err) {
-        alert('加载详情失败：' + err.message);
-        goBack();
-      }
-    }
-
-    function renderDetailPage() {
-      if (!currentDetailItem) return;
-      detailTitle.textContent = currentDetailItem.code || currentDetailItem.id;
-      detailSubtitle.textContent = currentDetailItem.shipType || '';
-      renderDetailMeta(currentDetailItem);
-      renderTimelineFilters(currentDetailItem.timelineTypes || []);
-      renderTimeline();
-    }
-
-    function showDetailView() {
-      previousView = currentView;
-      currentView = 'detail';
-      document.querySelector('#listSection').style.display = 'none';
-      document.querySelector('#listSectionRight').style.display = 'none';
-      document.querySelector('#calendarSection').style.display = 'none';
-      document.querySelector('#kanbanSection').style.display = 'none';
-      document.querySelector('#workspaceSection').style.display = 'none';
-      detailSection.style.display = '';
-      document.querySelector('#main').classList.add('detail-view');
-      document.querySelector('#tabList').classList.remove('active');
-      document.querySelector('#tabKanban').classList.remove('active');
-      document.querySelector('#tabCalendar').classList.remove('active');
-      document.querySelector('#tabCalibration').classList.remove('active');
-      document.querySelector('#tabWorkspace').classList.remove('active');
-    }
-
-    function goBack() {
-      if (previousView === 'calendar') {
-        switchView('calendar');
-      } else if (previousView === 'kanban') {
-        switchView('kanban');
-      } else if (previousView === 'workspace') {
-        switchView('workspace');
-      } else {
-        switchView('list');
-      }
-    }
-
-    async function addDetailNote() {
-      if (!currentDetailItem) return;
-      const note = prompt('请输入备注内容：');
-      if (!note || !note.trim()) return;
-      const itemId = currentDetailItem.id || currentDetailItem.code;
-      try {
-        await api('/api/items/' + encodeURIComponent(itemId) + '/logs', {
-          method: 'POST',
-          body: JSON.stringify({ step: '备注', note: note.trim() })
-        });
-        await loadDetail(itemId);
-        await load();
-      } catch (err) {
-        alert('追加备注失败：' + err.message);
-      }
-    }
-
-    function cardHtml(item) {
-      const itemId = item.id || item.code;
-      const main = fields.slice(0,4).map(([key,label]) => '<div><b>'+label+'</b> '+(item[key] ?? '')+'</div>').join('');
-      const dueHtml = item.dueDate ? '<div class="meta"><b>交付日期</b> <span class="' + (isOverdue(item.dueDate) && item.status !== '已交付' ? 'due-highlight' : '') + '">' + item.dueDate + '</span>' + (isOverdue(item.dueDate) && item.status !== '已交付' ? ' <span class="due-tag">已逾期</span>' : '') + '</div>' : '';
-      const ownerHtml = item.owner ? '<div class="meta"><b>负责人</b> ' + item.owner + '</div>' : '';
-      const tasks = (item.tasks || []).map(t => '<div class="meta">任务 '+t.position+' · '+t.status+' · '+t.tension+'</div>').join('');
-      const logs = (item.logs || []).slice(-4).map(l => '<div>'+l.step+'：'+l.note+'</div>').join('');
-      return '<article class="card"><h3 style="cursor:pointer;color:var(--accent)" data-detail="' + itemId + '">' + (item.code || item.id) + '</h3><span class="pill">'+item.status+'</span>'+main+ownerHtml+dueHtml+tasks+'<label>状态</label><select data-status="'+itemId+'">'+stages.map(s => '<option '+(s===item.status?'selected':'')+'>'+s+'</option>').join('')+'</select><button class="secondary" data-note="'+itemId+'">追加备注</button><button class="ghost" style="margin-top:4px" data-detail="' + itemId + '">查看时间线 →</button><div class="logs meta">'+(logs || '暂无记录')+'</div></article>';
-    }
-
-    function renderList() {
-      itemSelect.innerHTML = items.map(item => '<option value="'+(item.id || item.code)+'">'+(item.code || item.id)+' · '+(item.name || item.shipType || item.source || item.plateSize || '')+'</option>').join('');
-      const stats = Object.fromEntries(stages.map(s => [s, items.filter(i => i.status === s).length]));
-      statsEl.innerHTML = Object.entries(stats).map(([k,v]) => '<div class="stat"><span>'+k+'</span><strong>'+v+'</strong></div>').join('');
-      const status = document.querySelector('#statusFilter').value;
-      const q = document.querySelector('#search').value.trim();
-      const visible = items.filter(item => (!status || item.status === status) && (!q || JSON.stringify(item).includes(q)));
-      if (visible.length === 0) {
-        cards.innerHTML = emptyHtml('📋', '暂无模型', '请创建模型或调整筛选条件');
-      } else {
-        cards.innerHTML = visible.map(item => cardHtml(item)).join('');
-      }
-      bindCardEvents();
-    }
-
-    function bindCardEvents() {
-      document.querySelectorAll('[data-status]').forEach(sel => sel.onchange = async () => { await api('/api/items/'+sel.dataset.status, { method:'PATCH', body: JSON.stringify({ status: sel.value }) }); await load(); if (currentView === 'detail' && currentDetailItem && (sel.dataset.status === currentDetailItem.id || sel.dataset.status === currentDetailItem.code)) { await loadDetail(sel.dataset.status); } });
-      document.querySelectorAll('[data-note]').forEach(btn => btn.onclick = async () => { const id = btn.dataset.note; const note = prompt('记录备注'); if (note) { await api('/api/items/'+id+'/logs', { method:'POST', body: JSON.stringify({ step:'备注', note }) }); await load(); if (currentView === 'detail' && currentDetailItem && (id === currentDetailItem.id || id === currentDetailItem.code)) { await loadDetail(id); } } });
-      document.querySelectorAll('[data-detail]').forEach(el => el.onclick = async (e) => { e.stopPropagation(); const id = el.dataset.detail; showDetailView(); await loadDetail(id); });
-    }
-
-    function getItemsByDate(dateStr) {
-      return items.filter(item => item.dueDate === dateStr);
-    }
-
-    function renderCalendar() {
-      const year = viewDate.getFullYear();
-      const month = viewDate.getMonth();
-      calendarTitle.textContent = year + '年' + (month + 1) + '月';
-
-      const firstDay = new Date(year, month, 1);
-      const lastDay = new Date(year, month + 1, 0);
-      const startDay = firstDay.getDay();
-      const daysInMonth = lastDay.getDate();
-      const today = new Date();
-
-      let html = weekdays.map(w => '<div class="weekday">' + w + '</div>').join('');
-
-      const prevMonthLast = new Date(year, month, 0).getDate();
-      for (let i = startDay - 1; i >= 0; i--) {
-        const d = prevMonthLast - i;
-        const dateObj = new Date(year, month - 1, d);
-        const dateStr = formatDate(dateObj);
-        const dayItems = getItemsByDate(dateStr);
-        html += '<div class="calendar-cell other-month" data-date="' + dateStr + '"><div class="day-number">' + d + '</div>' + renderDayDots(dayItems) + '</div>';
-      }
-
-      for (let d = 1; d <= daysInMonth; d++) {
-        const dateObj = new Date(year, month, d);
-        const dateStr = formatDate(dateObj);
-        const dayItems = getItemsByDate(dateStr);
-        let classes = 'calendar-cell';
-        if (isSameDay(dateObj, today)) classes += ' today';
-        if (selectedDate && dateStr === selectedDate) classes += ' selected';
-        html += '<div class="' + classes + '" data-date="' + dateStr + '"><div class="day-number">' + d + '</div>' + renderDayDots(dayItems) + '</div>';
-      }
-
-      const remaining = 42 - (startDay + daysInMonth);
-      for (let d = 1; d <= remaining; d++) {
-        const dateObj = new Date(year, month + 1, d);
-        const dateStr = formatDate(dateObj);
-        const dayItems = getItemsByDate(dateStr);
-        html += '<div class="calendar-cell other-month" data-date="' + dateStr + '"><div class="day-number">' + d + '</div>' + renderDayDots(dayItems) + '</div>';
-      }
-
-      calendarGrid.innerHTML = html;
-
-      document.querySelectorAll('.calendar-cell').forEach(cell => {
-        cell.onclick = () => {
-          selectedDate = cell.dataset.date;
-          renderCalendar();
-          renderCalendarDetail();
-        };
-      });
-
-      renderCalendarDetail();
-    }
-
-    function renderDayDots(dayItems) {
-      if (dayItems.length === 0) return '';
-      const dots = dayItems.slice(0, 5).map(() => '<span class="day-dot"></span>').join('');
-      const count = dayItems.length > 5 ? '<div class="day-count">+' + (dayItems.length - 5) + '</div>' : '';
-      return '<div class="day-dots">' + dots + '</div>' + count;
-    }
-
-    function renderCalendarDetail() {
-      if (!selectedDate) {
-        const monthItems = items.filter(item => {
-          if (!item.dueDate) return false;
-          const d = new Date(item.dueDate);
-          return d.getFullYear() === viewDate.getFullYear() && d.getMonth() === viewDate.getMonth();
-        });
-        if (monthItems.length === 0) {
-          calendarDetail.innerHTML = '<div class="panel">' + emptyHtml('📅', '本月暂无交付计划', '选择具体日期查看当天交付的模型，或创建新模型设置交付日期') + '</div>';
-        } else {
-          const sorted = [...monthItems].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-          calendarDetail.innerHTML = '<div class="panel"><div class="calendar-detail-header"><h3>本月待交付（' + sorted.length + '）</h3></div><div class="grid">' + sorted.map(item => cardHtml(item)).join('') + '</div></div>';
-        }
-      } else {
-        const dayItems = getItemsByDate(selectedDate);
-        const dateObj = new Date(selectedDate);
-        const dateLabel = selectedDate + ' 周' + weekdays[dateObj.getDay()];
-        if (dayItems.length === 0) {
-          calendarDetail.innerHTML = '<div class="panel"><div class="calendar-detail-header"><h3>' + dateLabel + '</h3><button class="ghost" id="clearDate">清除筛选</button></div>' + emptyHtml('🌊', '当天无交付模型', '该日期没有计划交付的模型') + '</div>';
-        } else {
-          calendarDetail.innerHTML = '<div class="panel"><div class="calendar-detail-header"><h3>' + dateLabel + ' · 共 ' + dayItems.length + ' 个模型</h3><button class="ghost" id="clearDate">清除筛选</button></div><div class="grid">' + dayItems.map(item => cardHtml(item)).join('') + '</div></div>';
-        }
-        const clearBtn = document.querySelector('#clearDate');
-        if (clearBtn) clearBtn.onclick = () => { selectedDate = null; renderCalendar(); };
-      }
-      bindCardEvents();
-    }
-
-    function switchView(view) {
-      currentView = view;
-      if (!handlingPopState && location.pathname.startsWith('/items/')) {
-        history.pushState({}, '', '/');
-      }
-      document.querySelector('#tabList').classList.toggle('active', view === 'list');
-      document.querySelector('#tabKanban').classList.toggle('active', view === 'kanban');
-      document.querySelector('#tabCalendar').classList.toggle('active', view === 'calendar');
-      document.querySelector('#tabCalibration').classList.toggle('active', view === 'calibration');
-      document.querySelector('#tabWorkspace').classList.toggle('active', view === 'workspace');
-      document.querySelector('#listSection').style.display = view === 'list' ? '' : 'none';
-      document.querySelector('#listSectionRight').style.display = view === 'list' ? '' : 'none';
-      document.querySelector('#calendarSection').style.display = view === 'calendar' ? '' : 'none';
-      document.querySelector('#kanbanSection').style.display = view === 'kanban' ? '' : 'none';
-      calibrationSection.style.display = view === 'calibration' ? '' : 'none';
-      document.querySelector('#workspaceSection').style.display = view === 'workspace' ? '' : 'none';
-      detailSection.style.display = 'none';
-      document.querySelector('#main').classList.remove('detail-view');
-      document.querySelector('#main').classList.toggle('calendar-view', view === 'calendar');
-      document.querySelector('#main').classList.toggle('kanban-view', view === 'kanban');
-      if (view === 'calendar') {
-        renderCalendar();
-      } else if (view === 'kanban') {
-        if (window.initKanban) {
-          initKanban();
-        }
-      } else if (view === 'calibration') {
-        loadCalibrationRules();
-      } else if (view === 'workspace') {
-        if (window.initWorkspace) {
-          initWorkspace(window._wsIsInitializing && window._wsIsInitializing());
-        }
-      } else {
-        renderList();
-      }
-    }
-
-    function render() {
-      if (currentView === 'list') renderList();
-      else if (currentView === 'calendar') renderCalendar();
-      else if (currentView === 'kanban' && window.refreshKanban) refreshKanban();
-      else if (currentView === 'calibration') renderCalibrationRules();
-      else if (currentView === 'workspace' && window.refreshWorkspace) refreshWorkspace();
-    }
-
-    async function loadCalibrationRules() {
-      try {
-        const params = new URLSearchParams();
-        if (calMaterialFilter.value) params.set('material', calMaterialFilter.value);
-        if (calScaleFilter.value) params.set('scale', calScaleFilter.value);
-        if (calSearch.value.trim()) params.set('keyword', calSearch.value.trim());
-        const query = params.toString() ? '?' + params.toString() : '';
-        calibrationRules = await api('/api/calibration/rules' + query);
-        const filters = await api('/api/calibration/filters');
-        calMaterialFilter.innerHTML = '<option value="">全部材料</option>' + filters.materials.map(m => '<option value="' + m + '">' + m + '</option>').join('');
-        calScaleFilter.innerHTML = '<option value="">全部比例</option>' + filters.scales.map(s => '<option value="' + s + '">' + s + '</option>').join('');
-        renderCalibrationRules();
-      } catch (e) {
-        alert('加载校准库失败：' + e.message);
-      }
-    }
-
-    function renderCalibrationRules() {
-      if (calibrationRules.length === 0) {
-        calibrationRulesEl.innerHTML = emptyHtml('📐', '暂无校准规则', '点击"新增规则"添加第一条材料与松紧校准规则');
-        return;
-      }
-      calibrationRulesEl.innerHTML = calibrationRules.map(rule => calibrationRuleCardHtml(rule)).join('');
-      bindCalibrationRuleEvents();
-    }
-
-    function calibrationRuleCardHtml(rule) {
-      return '<article class="card"><h3 style="margin:0">' + rule.material + ' · ' + rule.scale + '</h3><div class="meta"><b>索具位置</b> ' + rule.position + '</div><div class="meta"><b>建议松紧范围</b> <span class="pill">' + (rule.tensionRange || '—') + '</span></div><div class="meta"><b>建议松紧状态</b> <span class="pill" style="background:#e6ebe2;color:var(--accent);border-color:var(--accent);">' + (rule.suggestedTension || '—') + '</span></div><div class="meta" style="margin-top:6px"><b>备注模板</b></div><div style="background:var(--calendar-bg);padding:8px 10px;border-radius:6px;font-size:13px;line-height:1.5">' + (rule.noteTemplate || '（无）') + '</div><div class="meta" style="margin-top:6px">更新于 ' + formatDateTime(rule.updatedAt) + '</div><div style="display:flex;gap:8px;margin-top:8px"><button class="secondary" data-cal-edit="' + rule.id + '">编辑</button><button class="ghost" data-cal-del="' + rule.id + '">删除</button></div></article>';
-    }
-
-    function bindCalibrationRuleEvents() {
-      document.querySelectorAll('[data-cal-edit]').forEach(btn => btn.onclick = () => openCalibrationForm(btn.dataset.calEdit));
-      document.querySelectorAll('[data-cal-del]').forEach(btn => btn.onclick = async () => {
-        if (!confirm('确定删除该校准规则吗？删除不影响历史任务。')) return;
-        try {
-          await api('/api/calibration/rules/' + encodeURIComponent(btn.dataset.calDel), { method: 'DELETE' });
-          await loadCalibrationRules();
-        } catch (e) {
-          alert('删除失败：' + e.message);
-        }
-      });
-    }
-
-    function openCalibrationForm(ruleId) {
-      const rule = ruleId ? calibrationRules.find(r => r.id === ruleId) : null;
-      editingCalibrationRule = rule || null;
-      const isEdit = !!rule;
-      const title = isEdit ? '编辑校准规则' : '新增校准规则';
-      const data = rule || { material: '', scale: '', position: '', tensionRange: '', suggestedTension: '', noteTemplate: '' };
-      const html = '<div id="calFormOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;"><div class="panel" style="max-width:520px;width:100%;max-height:90vh;overflow:auto;"><h2 style="margin:0 0 12px">' + title + '</h2><form id="calRuleForm"><label>帆索材料</label><input name="material" value="' + (data.material || '') + '" required placeholder="如：蜡线、麻绳、棉线"><label>模型比例</label><input name="scale" value="' + (data.scale || '') + '" required placeholder="如：1:48、1:50"><label>索具位置</label><input name="position" value="' + (data.position || '') + '" required placeholder="如：前桅侧支索、主桅升帆索"><label>建议松紧范围</label><input name="tensionRange" value="' + (data.tensionRange || '') + '" placeholder="如：正常-偏紧、偏松-正常"><label>建议松紧状态</label><input name="suggestedTension" value="' + (data.suggestedTension || '') + '" placeholder="如：正常、偏紧、偏松"><label>备注模板</label><textarea name="noteTemplate" style="width:100%;border:1px solid var(--line);border-radius:6px;padding:9px;font:inherit;background:#fff;min-height:80px;" placeholder="调整建议备注模板...">' + (data.noteTemplate || '') + '</textarea><div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;"><button type="button" class="ghost" id="calCancelBtn">取消</button><button type="submit">' + (isEdit ? '保存修改' : '创建规则') + '</button></div></form></div></div>';
-      document.body.insertAdjacentHTML('beforeend', html);
-      const overlay = document.querySelector('#calFormOverlay');
-      const form = document.querySelector('#calRuleForm');
-      document.querySelector('#calCancelBtn').onclick = () => overlay.remove();
-      overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-      form.onsubmit = async (ev) => {
-        ev.preventDefault();
-        const formData = Object.fromEntries(new FormData(form).entries());
-        try {
-          if (isEdit) {
-            await api('/api/calibration/rules/' + encodeURIComponent(ruleId), { method: 'PATCH', body: JSON.stringify(formData) });
-          } else {
-            await api('/api/calibration/rules', { method: 'POST', body: JSON.stringify(formData) });
-          }
-          overlay.remove();
-          await loadCalibrationRules();
-        } catch (e) {
-          alert('保存失败：' + e.message);
-        }
-      };
-    }
-
-    async function load() {
-      items = await api('/api/items');
-      render();
-    }
-
-    async function refreshAll() {
-      items = await api('/api/items');
-      if (currentView === 'kanban' && window.refreshKanban) {
-        await refreshKanban();
-      } else if (currentView === 'workspace' && window.refreshWorkspace) {
-        await refreshWorkspace();
-      } else {
-        render();
-      }
-    }
-
-    createForm.onsubmit = async event => { event.preventDefault(); await api('/api/items', { method:'POST', body: JSON.stringify(Object.fromEntries(new FormData(createForm).entries())) }); createForm.reset(); await refreshAll(); };
-    actionForm.onsubmit = async event => { event.preventDefault(); await api('/api/items/'+itemSelect.value+'/action', { method:'POST', body: JSON.stringify(Object.fromEntries(new FormData(actionForm).entries())) }); actionForm.reset(); await refreshAll(); };
-    document.querySelector('#statusFilter').onchange = render;
-    document.querySelector('#search').oninput = render;
-    document.querySelector('#reload').onclick = refreshAll;
-    document.querySelector('#importBtn').onclick = () => { location.href = '/import'; };
-    document.querySelector('#tabList').onclick = () => switchView('list');
-    document.querySelector('#tabKanban').onclick = () => switchView('kanban');
-    document.querySelector('#tabCalendar').onclick = () => switchView('calendar');
-    document.querySelector('#tabCalibration').onclick = () => switchView('calibration');
-    document.querySelector('#tabWorkspace').onclick = () => switchView('workspace');
-    calAddBtn.onclick = () => openCalibrationForm();
-    calMaterialFilter.onchange = loadCalibrationRules;
-    calScaleFilter.onchange = loadCalibrationRules;
-    calSearch.oninput = loadCalibrationRules;
-    detailBackBtn.onclick = goBack;
-    detailAddNoteBtn.onclick = addDetailNote;
-    document.querySelector('#tabDashboard').onclick = () => { location.href = '/dashboard'; };
-    document.querySelector('#tabBackup').onclick = () => { location.href = '/backup'; };
-    document.querySelector('#prevMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() - 1); renderCalendar(); };
-    document.querySelector('#nextMonth').onclick = () => { viewDate.setMonth(viewDate.getMonth() + 1); renderCalendar(); };
-    document.querySelector('#todayBtn').onclick = () => { viewDate = new Date(); selectedDate = formatDate(new Date()); renderCalendar(); };
-
-    document.querySelector('#toggleExportBtn').onclick = () => {
-      const panel = document.querySelector('#exportPanel');
-      if (panel.style.display === 'none') {
-        panel.style.display = '';
-        initExportPanel();
-      } else {
-        panel.style.display = 'none';
-      }
-    };
-    document.querySelector('#closeExportBtn').onclick = () => {
-      document.querySelector('#exportPanel').style.display = 'none';
-    };
-
-    function getWeekRange(date) {
-      const d = new Date(date);
-      const day = d.getDay();
-      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-      const start = new Date(d);
-      start.setDate(diff);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(start);
-      end.setDate(start.getDate() + 6);
-      end.setHours(23, 59, 59, 999);
-      return { start, end };
-    }
-
-    function formatExportDate(d) {
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return y + '-' + m + '-' + day;
-    }
-
-    async function initExportPanel() {
-      try {
-        const filters = await api('/api/calendar/export/filters');
-        renderExportCheckboxes('exportStatusGroup', filters.statuses, 'statuses');
-        renderExportCheckboxes('exportOwnerGroup', filters.owners, 'owners');
-      } catch (e) {
-        console.error('加载导出筛选条件失败:', e);
-      }
-      document.querySelectorAll('[data-range]').forEach(btn => {
-        btn.onclick = () => setQuickDateRange(btn.dataset.range);
-      });
-      document.querySelector('#clearDateRangeBtn').onclick = () => {
-        document.querySelector('#exportStartDate').value = '';
-        document.querySelector('#exportEndDate').value = '';
-        exportFilters.startDate = '';
-        exportFilters.endDate = '';
-      };
-      document.querySelector('#exportStartDate').onchange = (e) => { exportFilters.startDate = e.target.value; };
-      document.querySelector('#exportEndDate').onchange = (e) => { exportFilters.endDate = e.target.value; };
-      document.querySelector('#exportPreviewBtn').onclick = runExportPreview;
-      document.querySelector('#exportDownloadBtn').onclick = downloadExportCsv;
-    }
-
-    function setQuickDateRange(range) {
-      const now = new Date();
-      let start, end;
-      if (range === 'thisWeek') {
-        const r = getWeekRange(now);
-        start = r.start; end = r.end;
-      } else if (range === 'nextWeek') {
-        const next = new Date(now);
-        next.setDate(next.getDate() + 7);
-        const r = getWeekRange(next);
-        start = r.start; end = r.end;
-      } else if (range === 'thisMonth') {
-        start = new Date(now.getFullYear(), now.getMonth(), 1);
-        end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      } else if (range === 'nextMonth') {
-        start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        end = new Date(now.getFullYear(), now.getMonth() + 2, 0);
-      }
-      const startStr = formatExportDate(start);
-      const endStr = formatExportDate(end);
-      document.querySelector('#exportStartDate').value = startStr;
-      document.querySelector('#exportEndDate').value = endStr;
-      exportFilters.startDate = startStr;
-      exportFilters.endDate = endStr;
-    }
-
-    function renderExportCheckboxes(containerId, options, filterKey) {
-      const container = document.getElementById(containerId);
-      if (!container) return;
-      if (options.length === 0) {
-        container.innerHTML = '<span class="meta">暂无选项</span>';
-        return;
-      }
-      container.innerHTML = options.map(opt => {
-        const label = opt === '' ? '（未分配）' : opt;
-        const checked = exportFilters[filterKey].includes(opt);
-        return '<label class="checkbox-item"><input type="checkbox" data-filter-key="' + filterKey + '" value="' + (opt === '' ? '__empty__' : opt) + '" ' + (checked ? 'checked' : '') + '>' + label + '</label>';
-      }).join('');
-      container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.onchange = () => {
-          const key = cb.dataset.filterKey;
-          const val = cb.value === '__empty__' ? '' : cb.value;
-          if (cb.checked) {
-            if (!exportFilters[key].includes(val)) exportFilters[key].push(val);
-          } else {
-            exportFilters[key] = exportFilters[key].filter(v => v !== val);
-          }
-          exportPreviewData = null;
-          document.querySelector('#exportDownloadBtn').disabled = true;
-        };
-      });
-    }
-
-    async function runExportPreview() {
-      const btn = document.querySelector('#exportPreviewBtn');
-      const dlBtn = document.querySelector('#exportDownloadBtn');
-      const countEl = document.querySelector('#exportResultCount');
+    const form = document.getElementById('loginForm');
+    const btn = document.getElementById('loginBtn');
+    const errorMsg = document.getElementById('errorMsg');
+    
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      if (!username || !password) return;
+      
       btn.disabled = true;
-      btn.textContent = '加载中...';
+      btn.innerHTML = '<span class="loading"></span>登录中...';
+      errorMsg.style.display = 'none';
+      
       try {
-        const requestFilters = {
-          startDate: exportFilters.startDate || undefined,
-          endDate: exportFilters.endDate || undefined,
-          statuses: exportFilters.statuses,
-          owners: exportFilters.owners
-        };
-        const result = await api('/api/calendar/export/preview', {
-          method: 'POST',
-          body: JSON.stringify(requestFilters)
-        });
-        exportPreviewData = { ...result, filters: requestFilters };
-        renderExportPreview(result);
-        countEl.style.display = '';
-        countEl.innerHTML = '共 <span class="export-count-pill">' + result.total + '</span> 条记录';
-        if (result.total > 0) {
-          dlBtn.disabled = false;
-        } else {
-          dlBtn.disabled = true;
-        }
-      } catch (e) {
-        alert('预览失败：' + e.message);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '🔍 预览导出';
-      }
-    }
-
-    function renderExportPreview(result) {
-      const container = document.querySelector('#exportPreviewContainer');
-      if (!result || result.total === 0) {
-        container.innerHTML = '<div class="export-preview-empty"><div class="export-preview-empty-icon">📭</div><h3 style="margin:0 0 6px">暂无符合条件的数据</h3><div class="meta">请调整筛选条件后再次预览</div></div>';
-        return;
-      }
-      let html = '<div class="export-preview-container"><table class="export-preview-table"><thead><tr>';
-      for (const col of result.columns) {
-        html += '<th>' + col.label + '</th>';
-      }
-      html += '</tr></thead><tbody>';
-      for (const row of result.rows) {
-        html += '<tr>';
-        for (const col of result.columns) {
-          const val = row[col.key] !== undefined && row[col.key] !== null ? String(row[col.key]) : '';
-          html += '<td>' + (val === '' ? '<span class="meta">—</span>' : val) + '</td>';
-        }
-        html += '</tr>';
-      }
-      html += '</tbody></table></div>';
-      container.innerHTML = html;
-    }
-
-    async function downloadExportCsv() {
-      if (!exportPreviewData || exportPreviewData.total === 0) {
-        alert('没有可导出的数据，请先预览');
-        return;
-      }
-      try {
-        const requestFilters = {
-          startDate: exportFilters.startDate || undefined,
-          endDate: exportFilters.endDate || undefined,
-          statuses: exportFilters.statuses,
-          owners: exportFilters.owners
-        };
-        if (JSON.stringify(requestFilters) !== JSON.stringify(exportPreviewData.filters || {})) {
-          alert('筛选条件已变化，请重新预览后再下载');
-          return;
-        }
-        const res = await fetch('/api/calendar/export/csv', {
+        const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestFilters)
+          body: JSON.stringify({ username, password })
         });
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || '下载失败');
-        }
-        const blob = await res.blob();
-        const disposition = res.headers.get('Content-Disposition') || '';
-        let filename = '交付日历.csv';
-        const match = disposition.match(/filename="?([^"]+)"?/);
-        if (match) {
-          filename = decodeURIComponent(match[1]);
-        }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (e) {
-        alert('下载失败：' + e.message);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '登录失败');
+        
+        localStorage.setItem('auth_token', data.token);
+        localStorage.setItem('auth_user', JSON.stringify(data.user));
+        
+        window.location.href = '/';
+      } catch (err) {
+        const msgMap = {
+          user_not_found: '用户名不存在',
+          wrong_password: '密码错误',
+          username_and_password_required: '请输入用户名和密码'
+        };
+        errorMsg.textContent = msgMap[err.message] || err.message || '登录失败';
+        errorMsg.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = '登 录';
       }
-    }
-
-    function getDetailIdFromPath() {
-      const m = location.pathname.match(new RegExp('^/items/([^/]+)$'));
-      return m ? decodeURIComponent(m[1]) : null;
-    }
-
-    function getWorkspaceOwnerFromPath() {
-      const m = location.pathname.match(new RegExp('^/workspace/([^/]+)$'));
-      return m ? decodeURIComponent(m[1]) : null;
-    }
-
-    let handlingPopState = false;
-
-    window.addEventListener('popstate', () => {
-      handlingPopState = true;
-      const id = getDetailIdFromPath();
-      const owner = getWorkspaceOwnerFromPath();
-      if (id && currentView !== 'detail') {
-        showDetailView();
-        loadDetail(id).then(() => { handlingPopState = false; });
-        return;
-      } else if (owner && currentView !== 'detail') {
-        switchView('workspace');
-        if (window.wsShowWorkspace) {
-          window.wsShowWorkspace(owner);
-        }
-        handlingPopState = false;
-        return;
-      } else if (!id && !owner && currentView === 'detail') {
-        goBack();
-      } else if (!id && !owner && window._wsGetCurrentWorkspace && window._wsGetCurrentWorkspace()) {
-        if (window.wsShowOwnerList) {
-          window.wsShowOwnerList();
-        }
-      }
-      handlingPopState = false;
-    });
-
-    const origGoBack = goBack;
-    goBack = function() {
-      if (!handlingPopState && (location.pathname.startsWith('/items/') || location.pathname.startsWith('/workspace/'))) {
-        history.pushState({}, '', '/');
-      }
-      origGoBack();
     };
-
-    async function initFromUrl() {
-      const id = getDetailIdFromPath();
-      const owner = getWorkspaceOwnerFromPath();
-      if (id) {
-        await itemsPromise;
-        showDetailView();
-        await loadDetail(id);
-      } else if (owner) {
-        await itemsPromise;
-        if (window._wsSetInitializing) window._wsSetInitializing(true);
-        switchView('workspace');
-        if (window.wsShowWorkspace) {
-          window.wsShowWorkspace(owner);
-        }
-        if (window._wsSetInitializing) window._wsSetInitializing(false);
-      }
-    }
-
-    renderForms();
-    const itemsPromise = load();
-    initFromUrl();
   </script>
-  <script src="/public/kanban.js?v=4"></script>
-  <script src="/public/workspace.js?v=4"></script>
 </body>
 </html>`;
 }
 
-const server = http.createServer(async (req, res) => {
-  try {
-    const url = new URL(req.url, `http://${req.headers.host}`);
+function auditPageHtml() {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>审计日志 - 古船模型帆索校准</title>
+  <link rel="stylesheet" href="/public/dashboard.css">
+  <style>
+    :root { --bg:#f1f3ef; --panel:#fff; --ink:#20241f; --muted:#687066; --line:#d4ddd0; --accent:#526f43; --warn:#9b4937; --calendar-bg:#fafbf9; }
+    header { padding:18px 28px; background:#fff; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:16px; align-items:center; flex-wrap:wrap; }
+    main { padding:22px 28px; max-width:1400px; margin:0 auto; }
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:20px; }
+    .stat { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; }
+    .stat span { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+    .stat strong { font-size:22px; }
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; align-items:center; }
+    .toolbar select, .toolbar input { padding:7px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+    .toolbar input[type=date] { min-width:140px; }
+    .toolbar .ghost { background:transparent; border:1px solid var(--line); color:var(--muted); }
+    .log-table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+    .log-table th { background:var(--calendar-bg); padding:10px 12px; text-align:left; font-size:12px; color:var(--muted); font-weight:600; border-bottom:2px solid var(--line); }
+    .log-table td { padding:10px 12px; border-bottom:1px solid var(--line); font-size:13px; vertical-align:top; }
+    .log-table tr:last-child td { border-bottom:none; }
+    .log-table tr:hover td { background:var(--calendar-bg); }
+    .action-badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+    .action-model { background:#e6ebe2; color:var(--accent); }
+    .action-task { background:#ece9f2; color:#6b5b95; }
+    .action-backup { background:#f7f0db; color:#8b6914; }
+    .action-auth { background:#e6eef7; color:#2d5a8e; }
+    .action-calibration { background:#f5e6e2; color:var(--warn); }
+    .meta { color:var(--muted); font-size:12px; }
+    .actor-info { font-size:12px; }
+    .actor-name { font-weight:600; }
+    .actor-role { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; margin-left:4px; }
+    .role-admin { background:#fdf0ed; color:var(--warn); }
+    .role-user { background:var(--calendar-bg); color:var(--muted); }
+    .target-info { font-size:12px; }
+    .target-type { color:var(--muted); margin-right:4px; }
+    .target-name { font-weight:500; }
+    .detail-box { background:var(--calendar-bg); padding:6px 8px; border-radius:4px; font-size:11px; color:var(--muted); font-family:monospace; max-height:80px; overflow:auto; margin-top:4px; }
+    .empty { text-align:center; padding:60px 20px; color:var(--muted); }
+    .empty-icon { font-size:48px; margin-bottom:12px; opacity:.5; }
+    .pagination { display:flex; justify-content:space-between; align-items:center; margin-top:16px; font-size:13px; color:var(--muted); }
+    .pagination button { padding:6px 12px; border-radius:6px; }
+    .user-badge { display:inline-flex; align-items:center; gap:6px; background:var(--calendar-bg); border:1px solid var(--line); border-radius:999px; padding:4px 12px; font-size:13px; }
+    .logout-btn { background:transparent; border:1px solid var(--line); color:var(--muted); padding:6px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
+    .logout-btn:hover { border-color:var(--warn); color:var(--warn); }
+    .view-tabs { display:flex; gap:4px; background:var(--bg); padding:4px; border-radius:8px; }
+    .view-tabs button { background:transparent; color:var(--muted); padding:6px 14px; border-radius:6px; font-weight:600; border:none; cursor:pointer; }
+    .view-tabs button.active { background:var(--panel); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08); }
+    .loading { text-align:center; padding:40px; color:var(--muted); }
+    .loading-spinner { display:inline-block; width:24px; height:24px; border:3px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+      <div><h1 style="margin:0; font-size:22px;">⛵ 审计日志</h1><div class="meta">操作审计记录与追溯</div></div>
+      <div class="view-tabs">
+        <button id="tabMain">返回系统</button>
+        <button id="tabAudit" class="active">审计日志</button>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <div class="user-badge" id="userBadge"></div>
+      <button class="logout-btn" id="logoutBtn">退出登录</button>
+    </div>
+  </header>
+  <main>
+    <div class="stats" id="statsCards"></div>
     
-    if (url.pathname.startsWith('/public/')) {
-      const publicPath = join(__dirname, 'public');
-      const filePath = join(publicPath, url.pathname.slice('/public/'.length));
-      const served = await serveStatic(res, filePath);
-      if (served) return;
+    <div class="toolbar">
+      <select id="actionFilter">
+        <option value="">全部操作类型</option>
+      </select>
+      <select id="userFilter">
+        <option value="">全部用户</option>
+      </select>
+      <input type="date" id="startDate" placeholder="开始日期">
+      <input type="date" id="endDate" placeholder="结束日期">
+      <input type="text" id="keywordSearch" placeholder="搜索关键词...">
+      <button id="searchBtn">🔍 搜索</button>
+      <button class="ghost" id="resetBtn">重置</button>
+    </div>
+    
+    <div id="logContainer">
+      <div class="loading"><div class="loading-spinner"></div><p class="meta" style="margin-top:10px;">加载审计日志中...</p></div>
+    </div>
+    
+    <div class="pagination" id="pagination" style="display:none;">
+      <div id="pageInfo"></div>
+      <div style="display:flex; gap:8px;">
+        <button class="ghost" id="prevPageBtn" disabled>上一页</button>
+        <button id="nextPageBtn">下一页</button>
+      </div>
+    </div>
+  </main>
+  <script>
+    const authToken = localStorage.getItem('auth_token');
+    let authUser = null;
+    try { authUser = JSON.parse(localStorage.getItem('auth_user') || 'null'); } catch(e) {}
+    
+    if (!authToken) { window.location.href = '/login'; }
+    
+    let currentLogs = [];
+    let currentOffset = 0;
+    const pageSize = 50;
+    
+    function getActionClass(action) {
+      if (action.startsWith('model.')) return 'action-model';
+      if (action.startsWith('task.')) return 'action-task';
+      if (action.startsWith('backup.')) return 'action-backup';
+      if (action.startsWith('auth.') || action.startsWith('user.')) return 'action-auth';
+      if (action.startsWith('calibration.')) return 'action-calibration';
+      return '';
     }
     
-    const db = await loadDb();
-
-    if (req.method === "GET" && url.pathname === "/") return html(res, page());
-    const detailPageMatch = url.pathname.match(/^\/items\/([^/]+)$/);
-    if (detailPageMatch && req.method === "GET") return html(res, page(detailPageMatch[1]));
-    const workspacePageMatch = url.pathname.match(/^\/workspace\/([^/]+)$/);
-    if (workspacePageMatch && req.method === "GET") return html(res, page());
-    if (req.method === "GET" && url.pathname === "/import") return html(res, importPage());
-    if (req.method === "GET" && url.pathname === "/dashboard") {
-      const dashboardPath = join(__dirname, "public", "dashboard.html");
-      const served = await serveStatic(res, dashboardPath);
-      if (served) return;
+    function formatAction(action) {
+      const map = {
+        'model.create': '新增模型',
+        'model.update': '更新模型',
+        'model.status_change': '模型状态变更',
+        'model.note_add': '模型追加备注',
+        'model.owner_change': '模型负责人变更',
+        'task.create': '新增帆索任务',
+        'task.status_change': '任务状态变更',
+        'task.note_add': '任务追加备注',
+        'backup.create': '创建备份',
+        'backup.restore': '恢复备份',
+        'backup.download': '下载备份',
+        'calibration.rule_create': '新增校准规则',
+        'calibration.rule_update': '更新校准规则',
+        'calibration.rule_delete': '删除校准规则',
+        'auth.login': '用户登录',
+        'auth.logout': '用户登出',
+        'auth.password_change': '修改密码',
+        'user.create': '创建用户',
+        'user.update': '更新用户'
+      };
+      return map[action] || action;
     }
-    if (req.method === "GET" && url.pathname === "/backup") {
-      const backupPagePath = join(__dirname, "public", "backup.html");
-      const served = await serveStatic(res, backupPagePath);
-      if (served) return;
-    }
-
-    const backupResult = await handleBackupApi(req, res);
-    if (backupResult !== null) return;
     
-    const taskResult = await handleTasksApi(req, res, db);
-    if (taskResult !== null) return;
-
-    const riskResult = await handleRiskApi(req, res, db);
-    if (riskResult !== null) return;
-
-    const calibrationResult = await handleCalibrationApi(req, res);
-    if (calibrationResult !== null) return;
-
-    const ownerResult = await handleOwnerApi(req, res, db);
-    if (ownerResult !== null) return;
-
-    if (req.method === "GET" && url.pathname === "/api/items") return send(res, 200, db.items.map(summarize));
-
-    if (req.method === "GET" && url.pathname === "/api/items/calendar") {
-      const start = url.searchParams.get("start");
-      const end = url.searchParams.get("end");
-      const filtered = filterByDateRange(db.items, start, end);
-      return send(res, 200, filtered.map(summarize));
+    function formatDateTime(str) {
+      const d = new Date(str);
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
     }
-
-    const itemDetailMatch = url.pathname.match(/^\/api\/items\/([^/]+)$/);
-    if (itemDetailMatch && req.method === "GET") {
-      const reserved = ["calendar", "filters", "stats"];
-      if (reserved.includes(itemDetailMatch[1])) return send(res, 404, { error: "not_found" });
-      const detail = getItemWithTimeline(db, itemDetailMatch[1]);
-      if (!detail) return send(res, 404, { error: "item_not_found" });
-      return send(res, 200, detail);
+    
+    function renderUserBadge() {
+      if (!authUser) return;
+      const roleLabel = authUser.role === 'admin' ? '管理员' : '用户';
+      const roleClass = authUser.role === 'admin' ? 'role-admin' : 'role-user';
+      document.getElementById('userBadge').innerHTML = 
+        '👤 ' + authUser.displayName + ' <span class="actor-role ' + roleClass + '">' + roleLabel + '</span>';
     }
-    if (req.method === "POST" && url.pathname === "/api/items") {
-      const input = await body(req);
-      const item = { id: newId(), ...input, logs: [{ at: new Date().toISOString(), step: "建档", note: "创建模型" }] };
-      item.tasks = [];
-      db.items.unshift(item);
-      await saveDb(db);
-      return send(res, 201, item);
+    
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/audit/stats', { headers: { 'Authorization': 'Bearer ' + authToken } });
+        if (!res.ok) throw new Error('Failed');
+        const stats = await res.json();
+        document.getElementById('statsCards').innerHTML =
+          '<div class="stat"><span>审计日志总数</span><strong>' + stats.total + '</strong></div>' +
+          '<div class="stat"><span>最近24小时</span><strong style="color:var(--accent)">' + stats.last24h + '</strong></div>' +
+          '<div class="stat"><span>最近7天</span><strong>' + stats.last7d + '</strong></div>' +
+          '<div class="stat"><span>活跃用户数</span><strong>' + Object.keys(stats.users || {}).length + '</strong></div>';
+      } catch(e) {}
     }
-    const patch = url.pathname.match(/^\/api\/items\/([^/]+)$/);
-    if (patch && req.method === "PATCH") {
-      const item = db.items.find(x => x.id === patch[1] || x.code === patch[1]);
-      if (!item) return send(res, 404, { error: "item_not_found" });
-      Object.assign(item, await body(req));
-      item.logs ||= [];
-      item.logs.push({ at: new Date().toISOString(), step: "状态", note: "更新为" + item.status });
-      await saveDb(db);
-      return send(res, 200, item);
+    
+    async function loadFilters() {
+      try {
+        const res = await fetch('/api/audit/actions', { headers: { 'Authorization': 'Bearer ' + authToken } });
+        if (!res.ok) throw new Error('Failed');
+        const actions = await res.json();
+        const actionSelect = document.getElementById('actionFilter');
+        const sortedActions = Object.values(actions).sort();
+        const uniqueActions = [...new Set(sortedActions.map(a => a.split('.')[0]))];
+        for (const prefix of uniqueActions) {
+          const actionsInGroup = sortedActions.filter(a => a.startsWith(prefix + '.'));
+          const groupLabel = { model:'模型', task:'任务', backup:'备份', calibration:'校准', auth:'认证', user:'用户' }[prefix] || prefix;
+          const optgroup = document.createElement('optgroup');
+          optgroup.label = groupLabel;
+          for (const action of actionsInGroup) {
+            const opt = document.createElement('option');
+            opt.value = action;
+            opt.textContent = formatAction(action);
+            optgroup.appendChild(opt);
+          }
+          actionSelect.appendChild(optgroup);
+        }
+      } catch(e) {}
+      
+      try {
+        const res = await fetch('/api/auth/users', { headers: { 'Authorization': 'Bearer ' + authToken } });
+        if (!res.ok) throw new Error('Failed');
+        const users = await res.json();
+        const userSelect = document.getElementById('userFilter');
+        for (const u of users) {
+          const opt = document.createElement('option');
+          opt.value = u.username;
+          opt.textContent = u.displayName + ' (' + u.username + ')';
+          userSelect.appendChild(opt);
+        }
+      } catch(e) {}
     }
-    const log = url.pathname.match(/^\/api\/items\/([^/]+)\/logs$/);
-    if (log && req.method === "POST") {
-      const item = db.items.find(x => x.id === log[1] || x.code === log[1]);
-      if (!item) return send(res, 404, { error: "item_not_found" });
-      const input = await body(req);
-      item.logs ||= [];
-      item.logs.push({ at: new Date().toISOString(), step: input.step || "记录", note: input.note || "" });
-      await saveDb(db);
-      return send(res, 201, item);
-    }
-    const action = url.pathname.match(/^\/api\/items\/([^/]+)\/action$/);
-    if (action && req.method === "POST") {
-      const item = db.items.find(x => x.id === action[1] || x.code === action[1]);
-      if (!item) return send(res, 404, { error: "item_not_found" });
-      const input = await body(req);
-      item.logs ||= [];
-      item.tasks ||= [];
-      item.tasks.push({ id: "T-" + Date.now(), position: input.position, tension: input.tension, status: "待检查", logs: [{ at: new Date().toISOString(), note: input.note || "新增帆索任务" }] });
-      item.status = "校准中";
-      item.logs.push({ at: new Date().toISOString(), step: "帆索", note: input.position + " · " + input.tension });
-      await saveDb(db);
-      return send(res, 201, item);
-    }
-    if (req.method === "GET" && url.pathname === "/api/stats") return send(res, 200, computeStats(db.items));
-
-    if (req.method === "GET" && url.pathname === "/api/calendar/export/filters") {
-      const owners = getUniqueOwners(db.items);
-      return send(res, 200, {
-        statuses: MODEL_STATUSES,
-        owners: owners
-      });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/calendar/export/preview") {
-      const input = await body(req);
-      const rows = prepareExportData(db.items, {
-        startDate: input.startDate,
-        endDate: input.endDate,
-        statuses: input.statuses || [],
-        owners: input.owners || []
-      });
-      return send(res, 200, {
-        columns: getExportColumnLabels(),
-        rows: rows,
-        total: rows.length
-      });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/calendar/export/csv") {
-      const input = await body(req);
-      const rows = prepareExportData(db.items, {
-        startDate: input.startDate,
-        endDate: input.endDate,
-        statuses: input.statuses || [],
-        owners: input.owners || []
-      });
-      if (rows.length === 0) {
-        return send(res, 409, { error: "empty_export", message: "没有符合条件的交付记录，请调整筛选条件后再导出" });
+    
+    async function loadLogs() {
+      document.getElementById('logContainer').innerHTML = '<div class="loading"><div class="loading-spinner"></div><p class="meta" style="margin-top:10px;">加载审计日志中...</p></div>';
+      
+      const params = new URLSearchParams();
+      params.set('limit', String(pageSize));
+      params.set('offset', String(currentOffset));
+      
+      const actionFilter = document.getElementById('actionFilter').value;
+      const userFilter = document.getElementById('userFilter').value;
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      const keyword = document.getElementById('keywordSearch').value;
+      
+      if (actionFilter) params.set('action', actionFilter);
+      if (userFilter) params.set('username', userFilter);
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      if (keyword) params.set('keyword', keyword);
+      
+      try {
+        const res = await fetch('/api/audit/logs?' + params.toString(), { headers: { 'Authorization': 'Bearer ' + authToken } });
+        if (!res.ok) throw new Error('Failed');
+        const result = await res.json();
+        currentLogs = result.logs;
+        renderLogs(result);
+      } catch(e) {
+        document.getElementById('logContainer').innerHTML = '<div class="empty"><div class="empty-icon">⚠️</div><p>加载审计日志失败</p></div>';
       }
-      const csvContent = generateCsvWithBom(rows);
-      const now = new Date();
-      const filename = "交付日历_" + formatDate(now) + "_" + String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0") + ".csv";
-      res.writeHead(200, {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": 'attachment; filename="' + encodeURIComponent(filename) + '"',
-        "Content-Length": Buffer.byteLength(csvContent, "utf8")
-      });
-      res.end(csvContent, "utf8");
-      return;
     }
-
-    if (req.method === "POST" && url.pathname === "/api/import/preview") {
-      const contentType = req.headers["content-type"] || "";
-      const boundary = extractBoundary(contentType);
-      if (!boundary) return send(res, 400, { error: "invalid_multipart" });
-
-      const parts = await parseMultipart(req, boundary);
-      const filePart = parts.find(p => p.isFile && p.name === "file");
-      if (!filePart) return send(res, 400, { error: "no_file" });
-      if (filePart.data.length === 0) return send(res, 400, { error: "empty_file" });
-
-      const parsed = parseBuffer(filePart.data, filePart.filename || "");
-      const validated = validateAll(parsed, db.items);
-      validated.rows.forEach(r => {
-        r._taskPreview = generateTaskSummary(r.normalized);
-      });
-
-      return send(res, 200, validated);
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/import/commit") {
-      const input = await body(req);
-      if (!input.rows || !Array.isArray(input.rows)) {
-        return send(res, 400, { error: "invalid_rows" });
+    
+    function renderLogs(result) {
+      const container = document.getElementById('logContainer');
+      const pagination = document.getElementById('pagination');
+      
+      if (result.filteredTotal === 0) {
+        container.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><p>暂无符合条件的审计日志</p></div>';
+        pagination.style.display = 'none';
+        return;
       }
-      const result = await commitImport(db, saveDb, input.rows);
-      return send(res, 200, result);
+      
+      const rows = currentLogs.map(log => {
+        const roleClass = log.actor?.role === 'admin' ? 'role-admin' : 'role-user';
+        const roleLabel = log.actor?.role === 'admin' ? '管理员' : '用户';
+        const detailStr = log.detail && Object.keys(log.detail).length > 0 
+          ? '<div class="detail-box">' + JSON.stringify(log.detail) + '</div>' 
+          : '';
+        
+        return '<tr>' +
+          '<td>' + formatDateTime(log.timestamp) + '</td>' +
+          '<td><span class="action-badge ' + getActionClass(log.action) + '">' + formatAction(log.action) + '</span></td>' +
+          '<td class="actor-info">' +
+            (log.actor 
+              ? '<span class="actor-name">' + log.actor.displayName + '</span>' +
+                '<span class="actor-role ' + roleClass + '">' + roleLabel + '</span>' +
+                '<div class="meta">@' + log.actor.username + '</div>'
+              : '<span class="meta">系统</span>') +
+          '</td>' +
+          '<td class="target-info">' +
+            (log.target?.id || log.target?.name
+              ? '<span class="target-type">[' + (log.target.type || '-') + ']</span>' +
+                '<span class="target-name">' + (log.target.name || log.target.id) + '</span>'
+              : '<span class="meta">-</span>') +
+            detailStr +
+          '</td>' +
+          '<td class="meta">' + (log.ip || '-') + '</td>' +
+        '</tr>';
+      }).join('');
+      
+      container.innerHTML = 
+        '<table class="log-table">' +
+          '<thead><tr>' +
+            '<th style="width:160px;">时间</th>' +
+            '<th style="width:130px;">操作类型</th>' +
+            '<th style="width:160px;">操作人</th>' +
+            '<th>操作对象 / 详情</th>' +
+            '<th style="width:130px;">IP地址</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>';
+      
+      pagination.style.display = 'flex';
+      const totalPages = Math.ceil(result.filteredTotal / pageSize);
+      const currentPage = Math.floor(currentOffset / pageSize) + 1;
+      document.getElementById('pageInfo').textContent = 
+        '第 ' + currentPage + ' / ' + totalPages + ' 页，共 ' + result.filteredTotal + ' 条记录';
+      document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+      document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+    }
+    
+    document.getElementById('tabMain').onclick = function() { window.location.href = '/'; };
+    document.getElementById('logoutBtn').onclick = async function() {
+      try {
+        await fetch('/api/auth/logout', { 
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + authToken }
+        });
+      } catch(e) {}
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      window.location.href = '/login';
+    };
+    document.getElementById('searchBtn').onclick = function() { currentOffset = 0; loadLogs(); };
+    document.getElementById('resetBtn').onclick = function() {
+      document.getElementById('actionFilter').value = '';
+      document.getElementById('userFilter').value = '';
+      document.getElementById('startDate').value = '';
+      document.getElementById('endDate').value = '';
+      document.getElementById('keywordSearch').value = '';
+      currentOffset = 0;
+      loadLogs();
+    };
+    document.getElementById('prevPageBtn').onclick = function() {
+      if (currentOffset >= pageSize) {
+        currentOffset -= pageSize;
+        loadLogs();
+      }
+    };
+    document.getElementById('nextPageBtn').onclick = function() {
+      currentOffset += pageSize;
+      loadLogs();
+    };
+    
+    renderUserBadge();
+    loadStats();
+    loadFilters();
+    loadLogs();
+  </script>
+</body>
+</html>`;
+}
+
+function mainPageHtml() {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>古船模型帆索校准系统</title>
+  <link rel="stylesheet" href="/public/dashboard.css">
+  <link rel="stylesheet" href="/public/workspace.css">
+  <link rel="stylesheet" href="/public/kanban.css">
+  <style>
+    :root { --bg:#f1f3ef; --panel:#fff; --ink:#20241f; --muted:#687066; --line:#d4ddd0; --accent:#526f43; --warn:#9b4937; }
+    header { padding:18px 28px; background:#fff; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:16px; align-items:center; flex-wrap:wrap; }
+    .header-left { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+    h1 { margin:0; font-size:22px; }
+    main { padding:22px 28px; max-width:1400px; margin:0 auto; }
+    .user-badge { display:inline-flex; align-items:center; gap:6px; background:#fafbf9; border:1px solid var(--line); border-radius:999px; padding:4px 12px; font-size:13px; }
+    .logout-btn { background:transparent; border:1px solid var(--line); color:var(--muted); padding:6px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
+    .logout-btn:hover { border-color:var(--warn); color:var(--warn); }
+    .view-tabs { display:flex; gap:4px; background:var(--bg); padding:4px; border-radius:8px; }
+    .view-tabs button { background:transparent; color:var(--muted); padding:6px 14px; border-radius:6px; font-weight:600; border:none; cursor:pointer; font-size:13px; }
+    .view-tabs button.active { background:var(--panel); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08); }
+    .role-badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; margin-left:4px; }
+    .role-admin { background:#fdf0ed; color:var(--warn); }
+    .role-user { background:#fafbf9; color:var(--muted); }
+    .admin-only { display:none; }
+    .view-section { display:none; }
+    .view-section.active { display:block; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <div>
+        <h1>⛵ 古船模型帆索校准系统</h1>
+        <div class="meta">多用户协作 · 操作审计 · 权限隔离</div>
+      </div>
+      <div class="view-tabs">
+        <button id="tabList" class="active">📦 模型列表</button>
+        <button id="tabKanban">📋 任务看板</button>
+        <button id="tabWorkspace">👥 工作区</button>
+        <button id="tabRisk">📊 风险仪表盘</button>
+        <button id="tabBackup">💾 备份管理</button>
+        <button id="tabAudit" class="admin-only">📝 审计日志</button>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <div class="user-badge" id="userBadge"></div>
+      <button class="logout-btn" id="logoutBtn">退出登录</button>
+    </div>
+  </header>
+  <main>
+    <div id="viewList" class="view-section active"></div>
+    <div id="viewKanban" class="view-section"></div>
+    <div id="viewWorkspace" class="view-section"></div>
+    <div id="viewRisk" class="view-section"></div>
+    <div id="viewBackup" class="view-section"></div>
+  </main>
+  <script src="/public/workspace.js"></script>
+  <script src="/public/kanban.js"></script>
+  <script src="/public/dashboard.js"></script>
+  <script src="/public/backup.js"></script>
+  <script>
+    const authToken = localStorage.getItem('auth_token');
+    let authUser = null;
+    try { authUser = JSON.parse(localStorage.getItem('auth_user') || 'null'); } catch(e) {}
+    
+    if (!authToken) { window.location.href = '/login'; }
+    
+    const originalFetch = window.fetch;
+    window.fetch = function(url, options = {}) {
+      if (authToken && !options.headers) options.headers = {};
+      if (authToken && options.headers instanceof Headers) {
+        options.headers.set('Authorization', 'Bearer ' + authToken);
+      } else if (authToken && options.headers && typeof options.headers === 'object') {
+        options.headers['Authorization'] = 'Bearer ' + authToken;
+      } else if (authToken) {
+        options.headers = { 'Authorization': 'Bearer ' + authToken };
+      }
+      return originalFetch.apply(this, arguments);
+    };
+    
+    let currentView = 'list';
+    
+    function renderUserBadge() {
+      if (!authUser) return;
+      const roleLabel = authUser.role === 'admin' ? '管理员' : '用户';
+      const roleClass = authUser.role === 'admin' ? 'role-admin' : 'role-user';
+      document.getElementById('userBadge').innerHTML = 
+        '👤 ' + authUser.displayName + ' <span class="role-badge ' + roleClass + '">' + roleLabel + '</span>';
+      if (authUser.role === 'admin') {
+        document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
+      }
+    }
+    
+    function switchView(view) {
+      currentView = view;
+      document.querySelectorAll('.view-tabs button').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.view-section').forEach(sec => sec.classList.remove('active'));
+      const tabMap = { list: 'tabList', kanban: 'tabKanban', workspace: 'tabWorkspace', risk: 'tabRisk', backup: 'tabBackup', audit: 'tabAudit' };
+      const viewMap = { list: 'viewList', kanban: 'viewKanban', workspace: 'viewWorkspace', risk: 'viewRisk', backup: 'viewBackup' };
+      if (tabMap[view]) document.getElementById(tabMap[view]).classList.add('active');
+      if (viewMap[view]) document.getElementById(viewMap[view]).classList.add('active');
+      
+      if (view === 'list') { if (typeof load === 'function') load(); }
+      if (view === 'kanban') { if (typeof kanbanLoad === 'function') kanbanLoad(); }
+      if (view === 'workspace') { 
+        if (typeof wsLoadOwnerList === 'function') wsLoadOwnerList();
+        const ownerFromPath = typeof wsGetOwnerFromPath === 'function' ? wsGetOwnerFromPath() : null;
+        if (ownerFromPath && typeof wsShowWorkspace === 'function') wsShowWorkspace(ownerFromPath);
+      }
+      if (view === 'risk') { if (typeof dashboardLoad === 'function') dashboardLoad(); }
+      if (view === 'backup') { if (typeof backupLoad === 'function') backupLoad(); }
+      if (view === 'audit') { window.location.href = '/audit'; }
+    }
+    
+    document.getElementById('tabList').onclick = () => switchView('list');
+    document.getElementById('tabKanban').onclick = () => switchView('kanban');
+    document.getElementById('tabWorkspace').onclick = () => switchView('workspace');
+    document.getElementById('tabRisk').onclick = () => switchView('risk');
+    document.getElementById('tabBackup').onclick = () => switchView('backup');
+    document.getElementById('tabAudit').onclick = () => switchView('audit');
+    
+    document.getElementById('logoutBtn').onclick = async function() {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch(e) {}
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      window.location.href = '/login';
+    };
+    
+    renderUserBadge();
+    
+    window._authUser = authUser;
+    window._authToken = authToken;
+    
+    document.getElementById('viewList').innerHTML = \`
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+        <h2 style="margin:0;">📦 模型列表</h2>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button onclick="location.href='/import'">📥 批量导入</button>
+          <button id="addModelBtn" class="secondary">＋ 新增模型</button>
+          <button id="exportBtn" class="secondary">📤 导出CSV</button>
+        </div>
+      </div>
+      <div id="toolbar" style="margin-bottom:16px;"></div>
+      <div id="statsBar" style="margin-bottom:16px;"></div>
+      <div id="modelsGrid"></div>
+      <div id="detailView" style="display:none;"></div>
+    \`;
+    
+    document.getElementById('viewKanban').innerHTML = \`
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+        <h2 style="margin:0;">📋 帆索任务看板</h2>
+      </div>
+      <div id="kanbanFilters" style="margin-bottom:16px;"></div>
+      <div id="kanbanBoard"></div>
+    \`;
+    
+    document.getElementById('viewWorkspace').innerHTML = \`
+      <div style="margin-bottom:16px;">
+        <h2 style="margin:0;">👥 负责人工作区</h2>
+        <div class="meta" style="margin-top:4px;">点击负责人卡片进入对应工作区</div>
+      </div>
+      <div class="ws-section-header" style="margin-bottom:16px;">
+        <h3 style="margin:0;">所有负责人</h3>
+      </div>
+      <div id="wsOwnerList"></div>
+      <div id="wsWorkspace" style="display:none;"></div>
+    \`;
+    
+    document.getElementById('viewRisk').innerHTML = \`
+      <section id="summarySection">
+        <div class="stats" id="riskStats"></div>
+      </section>
+      <div class="dashboard-grid">
+        <section class="panel high-risk-section">
+          <div class="panel-header">
+            <h2>🚨 高风险模型列表</h2>
+            <div class="panel-actions">
+              <select id="riskLevelFilter">
+                <option value="all">全部风险</option>
+                <option value="high">仅高危</option>
+                <option value="medium">仅中危</option>
+              </select>
+            </div>
+          </div>
+          <div id="highRiskList" class="risk-list"></div>
+        </section>
+        <section class="panel owner-section">
+          <div class="panel-header">
+            <h2>👤 负责人风险分布</h2>
+          </div>
+          <div id="ownerDistribution" class="owner-list"></div>
+        </section>
+        <section class="panel pressure-section">
+          <div class="panel-header">
+            <h2>📅 未来7天交付压力</h2>
+          </div>
+          <div id="deliveryPressure" class="pressure-chart"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <div class="panel-header">
+          <h2>📋 风险评估规则说明</h2>
+        </div>
+        <div class="rules-grid">
+          <div class="rule-card high">
+            <h3>高危风险</h3>
+            <ul><li>已逾期未交付</li><li>7天内交付且有未完成任务</li><li>风险评分 ≥ 70</li></ul>
+          </div>
+          <div class="rule-card medium">
+            <h3>中危风险</h3>
+            <ul><li>14天内交付且超50%任务未完成</li><li>超过7天无更新记录</li><li>风险评分 40-69</li></ul>
+          </div>
+          <div class="rule-card low">
+            <h3>低危风险</h3>
+            <ul><li>进度正常，任务有序推进</li><li>风险评分 &lt; 40</li></ul>
+          </div>
+          <div class="rule-card none">
+            <h3>无风险 / 未计划</h3>
+            <ul><li>已交付的模型不计风险</li><li>无交付日期单独归类</li></ul>
+          </div>
+        </div>
+      </section>
+    \`;
+    
+    document.getElementById('viewBackup').innerHTML = \`
+      <div style="margin-bottom:16px;">
+        <h2 style="margin:0;">💾 备份管理</h2>
+        <div class="meta" style="margin-top:4px;">创建、下载、恢复数据备份</div>
+      </div>
+      <div id="statsSummary" style="margin-bottom:16px;"></div>
+      <div style="margin-bottom:16px;">
+        <button id="createBackupBtn">＋ 创建备份</button>
+      </div>
+      <div id="backupList"></div>
+      <div id="diffModal" style="display:none;"></div>
+      <div id="restoreModal" style="display:none;"></div>
+    \`;
+    
+    if (typeof wsInitOwnerList === 'function') wsInitOwnerList();
+    switchView('list');
+  </script>
+</body>
+</html>`;
+}
+
+async function parseBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+}
+
+async function handleItemsApi(req, res, db) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = url.pathname;
+  const ip = getClientIp(req);
+
+  if (!pathname.startsWith("/api/items")) return null;
+  if (!req.auth.isAuthenticated) return sendError(res, 401, "unauthorized");
+
+  if (req.method === "GET" && pathname === "/api/items") {
+    const start = url.searchParams.get("start") || "";
+    const end = url.searchParams.get("end") || "";
+    const ownerFilter = url.searchParams.get("owner") || "";
+    const statusFilter = url.searchParams.get("status") || "";
+    const search = url.searchParams.get("q") || "";
+
+    let items = getAllItems(db);
+    items = filterItemsByOwner(req.auth, items);
+
+    if (start || end) items = filterByDateRange(items, start, end);
+    if (ownerFilter) items = items.filter(i => (i.owner || "") === ownerFilter);
+    if (statusFilter) items = items.filter(i => i.status === statusFilter);
+    if (search) {
+      const kw = search.toLowerCase();
+      items = items.filter(i =>
+        (i.code || "").toLowerCase().includes(kw) ||
+        (i.shipType || "").toLowerCase().includes(kw) ||
+        (i.owner || "").toLowerCase().includes(kw)
+      );
     }
 
-    send(res, 404, { error: "not_found" });
-  } catch (error) {
-    console.error(error);
-    send(res, 500, { error: error.message });
+    const allOwners = getUniqueOwners(db);
+    const filteredOwners = filterOwnersForSelection(req.auth, allOwners);
+    const stats = computeStats(items);
+
+    return send(res, 200, {
+      items: items.map(summarize),
+      stats,
+      allOwners: filteredOwners,
+      statuses: MODEL_STATUSES,
+      fields,
+      extraFields,
+      currentUser: {
+        username: req.auth.user.username,
+        displayName: req.auth.user.displayName,
+        role: req.auth.user.role,
+        owner: req.auth.user.owner,
+        isAdmin: req.auth.isAdmin
+      }
+    });
   }
+
+  if (req.method === "POST" && pathname === "/api/items") {
+    try {
+      const body = await parseBody(req);
+      if (!canCreateItem(req.auth, body)) {
+        return sendError(res, 403, "forbidden_owner_mismatch");
+      }
+      if (!req.auth.isAdmin && body.owner && body.owner !== req.auth.user.owner) {
+        return sendError(res, 403, "forbidden_owner_mismatch");
+      }
+      const item = await createItem(db, body);
+
+      await writeAuditLog({
+        action: AUDIT_ACTIONS.MODEL_CREATE,
+        auth: req.auth,
+        targetType: "model",
+        targetId: item.id,
+        targetName: item.code || item.id,
+        detail: { code: item.code, shipType: item.shipType, owner: item.owner, dueDate: item.dueDate },
+        ip
+      });
+
+      return send(res, 201, item);
+    } catch (e) {
+      return sendError(res, 500, e.message);
+    }
+  }
+
+  const itemIdMatch = pathname.match(/^\/api\/items\/([^/]+)$/);
+
+  if (itemIdMatch && req.method === "GET") {
+    const id = decodeURIComponent(itemIdMatch[1]);
+    const item = findItemById(db, id);
+    if (!item) return sendError(res, 404, "item_not_found");
+    if (!canViewItem(req.auth, item)) return sendError(res, 403, "forbidden");
+    const detail = getItemWithTimeline(db, id);
+    return send(res, 200, detail);
+  }
+
+  if (itemIdMatch && req.method === "PATCH") {
+    try {
+      const id = decodeURIComponent(itemIdMatch[1]);
+      const body = await parseBody(req);
+      const item = findItemById(db, id);
+      if (!item) return sendError(res, 404, "item_not_found");
+      if (!canEditItem(req.auth, item)) return sendError(res, 403, "forbidden");
+
+      const oldStatus = item.status;
+      const oldOwner = item.owner;
+
+      if (body.owner !== undefined && body.owner !== oldOwner) {
+        if (!canChangeItemOwner(req.auth, item, body.owner)) {
+          return sendError(res, 403, "forbidden_owner_change");
+        }
+      }
+
+      const updated = await updateItem(db, id, body);
+
+      if (body.status !== undefined && body.status !== oldStatus) {
+        await writeAuditLog({
+          action: AUDIT_ACTIONS.MODEL_STATUS_CHANGE,
+          auth: req.auth,
+          targetType: "model",
+          targetId: updated.id,
+          targetName: updated.code || updated.id,
+          detail: { oldStatus, newStatus: body.status },
+          ip
+        });
+      }
+
+      if (body.owner !== undefined && body.owner !== oldOwner) {
+        await writeAuditLog({
+          action: AUDIT_ACTIONS.MODEL_OWNER_CHANGE,
+          auth: req.auth,
+          targetType: "model",
+          targetId: updated.id,
+          targetName: updated.code || updated.id,
+          detail: { oldOwner, newOwner: body.owner },
+          ip
+        });
+      }
+
+      const otherUpdates = { ...body };
+      delete otherUpdates.status;
+      delete otherUpdates.owner;
+      if (Object.keys(otherUpdates).length > 0) {
+        await writeAuditLog({
+          action: AUDIT_ACTIONS.MODEL_UPDATE,
+          auth: req.auth,
+          targetType: "model",
+          targetId: updated.id,
+          targetName: updated.code || updated.id,
+          detail: otherUpdates,
+          ip
+        });
+      }
+
+      return send(res, 200, updated);
+    } catch (e) {
+      return sendError(res, 500, e.message);
+    }
+  }
+
+  const itemLogsMatch = pathname.match(/^\/api\/items\/([^/]+)\/logs$/);
+  if (itemLogsMatch && req.method === "POST") {
+    try {
+      const id = decodeURIComponent(itemLogsMatch[1]);
+      const body = await parseBody(req);
+      const item = findItemById(db, id);
+      if (!item) return sendError(res, 404, "item_not_found");
+      if (!canEditItem(req.auth, item)) return sendError(res, 403, "forbidden");
+
+      const updated = await addItemLog(db, id, body.step || "备注", body.note || "");
+
+      await writeAuditLog({
+        action: AUDIT_ACTIONS.MODEL_NOTE_ADD,
+        auth: req.auth,
+        targetType: "model",
+        targetId: updated.id,
+        targetName: updated.code || updated.id,
+        detail: { step: body.step || "备注", note: body.note || "" },
+        ip
+      });
+
+      return send(res, 201, updated);
+    } catch (e) {
+      return sendError(res, 500, e.message);
+    }
+  }
+
+  const itemTasksMatch = pathname.match(/^\/api\/items\/([^/]+)\/tasks$/);
+  if (itemTasksMatch && req.method === "POST") {
+    try {
+      const id = decodeURIComponent(itemTasksMatch[1]);
+      const body = await parseBody(req);
+      const item = findItemById(db, id);
+      if (!item) return sendError(res, 404, "item_not_found");
+      if (!canEditItem(req.auth, item)) return sendError(res, 403, "forbidden");
+
+      const result = await createTask(db, id, body);
+
+      await writeAuditLog({
+        action: AUDIT_ACTIONS.TASK_CREATE,
+        auth: req.auth,
+        targetType: "task",
+        targetId: result.task.id,
+        targetName: body.position || result.task.id,
+        detail: { modelId: id, modelCode: item.code, position: body.position, tension: body.tension, note: body.note },
+        ip
+      });
+
+      return send(res, 201, result);
+    } catch (e) {
+      return sendError(res, 500, e.message);
+    }
+  }
+
+  return null;
+}
+
+async function handleExportApi(req, res, db) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = url.pathname;
+
+  if (pathname !== "/api/export/csv" || req.method !== "GET") return null;
+  if (!req.auth.isAuthenticated) return sendError(res, 401, "unauthorized");
+
+  let items = getAllItems(db);
+  items = filterItemsByOwner(req.auth, items);
+
+  const labels = getExportColumnLabels();
+  const rows = prepareExportData(items);
+  const csv = generateCsvWithBom(labels, rows);
+  const filename = `古船模型校准-${formatDate(new Date().toISOString())}.csv`;
+
+  res.writeHead(200, {
+    "Content-Type": "text/csv; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${filename}"`
+  });
+  res.end(csv);
+  return true;
+}
+
+async function handleImportApi(req, res, db) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = url.pathname;
+  const ip = getClientIp(req);
+
+  if (!pathname.startsWith("/api/import")) return null;
+  if (!req.auth.isAuthenticated) return sendError(res, 401, "unauthorized");
+
+  if (pathname === "/api/import/preview" && req.method === "POST") {
+    try {
+      const contentType = req.headers["content-type"] || "";
+      if (!contentType.startsWith("multipart/form-data")) {
+        return sendError(res, 400, "multipart_required");
+      }
+      const boundary = extractBoundary(contentType);
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const buf = Buffer.concat(chunks);
+      const parts = parseMultipart(buf, boundary);
+      const filePart = parts.find(p => p.name === "file");
+      if (!filePart || !filePart.content) {
+        return sendError(res, 400, "file_required");
+      }
+      const result = await parseBuffer(filePart.content, filePart.filename || "");
+      return send(res, 200, result);
+    } catch (e) {
+      return sendError(res, 500, e.message);
+    }
+  }
+
+  if (pathname === "/api/import/commit" && req.method === "POST") {
+    try {
+      const body = await parseBody(req);
+      const validRows = (body.rows || []).filter(r => r.valid);
+      const allowedRows = validRows.filter(r => {
+        const itemData = { owner: r.normalized.owner };
+        return canCreateItem(req.auth, itemData);
+      });
+      if (allowedRows.length < validRows.length && !req.auth.isAdmin) {
+        return sendError(res, 403, "forbidden_some_rows_owner_mismatch");
+      }
+      const result = await commitImport(db, saveDb, allowedRows);
+
+      for (const created of result.createdItems || []) {
+        await writeAuditLog({
+          action: AUDIT_ACTIONS.MODEL_CREATE,
+          auth: req.auth,
+          targetType: "model",
+          targetId: created.id,
+          targetName: created.code,
+          detail: { source: "batch_import", code: created.code, taskCount: created.taskCount },
+          ip
+        });
+      }
+
+      return send(res, 200, result);
+    } catch (e) {
+      return sendError(res, 500, e.message);
+    }
+  }
+
+  return null;
+}
+
+async function handlePageRoute(req, res, pathname) {
+  if (pathname === "/login") {
+    html(res, loginPageHtml());
+    return true;
+  }
+  if (pathname === "/audit") {
+    if (!req.auth.isAuthenticated) {
+      res.writeHead(302, { Location: "/login" });
+      res.end();
+      return true;
+    }
+    if (!req.auth.isAdmin) {
+      return sendError(res, 403, "forbidden_admin_required");
+    }
+    html(res, auditPageHtml());
+    return true;
+  }
+  if (pathname === "/import") {
+    if (!req.auth.isAuthenticated) {
+      res.writeHead(302, { Location: "/login" });
+      res.end();
+      return true;
+    }
+    html(res, importPage());
+    return true;
+  }
+  if (pathname === "/" || pathname === "/index.html" || pathname.startsWith("/workspace/")) {
+    if (!req.auth.isAuthenticated) {
+      res.writeHead(302, { Location: "/login" });
+      res.end();
+      return true;
+    }
+    html(res, mainPageHtml());
+    return true;
+  }
+  return false;
+}
+
+async function main() {
+  await ensureDb();
+  await runMigrationIfNeeded();
+
+  const server = http.createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const pathname = url.pathname;
+
+      await authMiddleware(req, res);
+
+      if (pathname.startsWith("/public/")) {
+        const filePath = join(__dirname, pathname);
+        if (await serveStatic(res, filePath)) return;
+      }
+
+      if (await handlePageRoute(req, res, pathname)) return;
+
+      if (pathname.startsWith("/api/")) {
+        let db = await loadDb();
+
+        if (pathname.startsWith("/api/auth")) {
+          const result = await handleAuthApi(req, res);
+          if (result !== null) return;
+        }
+
+        if (pathname.startsWith("/api/audit")) {
+          const result = await handleAuditApi(req, res);
+          if (result !== null) return;
+        }
+
+        if (pathname.startsWith("/api/items")) {
+          const result = await handleItemsApi(req, res, db);
+          if (result !== null && result !== undefined) return;
+        }
+
+        if (pathname.startsWith("/api/tasks")) {
+          const result = await handleTasksApi(req, res, db);
+          if (result !== null && result !== undefined) return;
+        }
+
+        if (pathname.startsWith("/api/risk")) {
+          const result = await handleRiskApi(req, res, db);
+          if (result !== null && result !== undefined) return;
+        }
+
+        if (pathname.startsWith("/api/calibration")) {
+          const result = await handleCalibrationApi(req, res);
+          if (result !== null && result !== undefined) return;
+        }
+
+        if (pathname.startsWith("/api/owners")) {
+          const result = await handleOwnerApi(req, res, db);
+          if (result !== null && result !== undefined) return;
+        }
+
+        if (pathname.startsWith("/api/backups")) {
+          const result = await handleBackupApi(req, res);
+          if (result !== null && result !== undefined) return;
+        }
+
+        if (pathname.startsWith("/api/export")) {
+          const result = await handleExportApi(req, res, db);
+          if (result !== null && result !== undefined) return;
+        }
+
+        if (pathname.startsWith("/api/import")) {
+          const result = await handleImportApi(req, res, db);
+          if (result !== null && result !== undefined) return;
+        }
+      }
+
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "not_found" }));
+    } catch (err) {
+      console.error("Server error:", err);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "internal_server_error", message: err.message }));
+    }
+  });
+
+  server.listen(port, () => {
+    console.log(`⛵ 古船模型帆索校准系统已启动: http://localhost:${port}`);
+    console.log(`   默认登录: admin / admin123`);
+  });
+}
+
+main().catch(err => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
 });
-server.listen(port, () => console.log("古船模型帆索校准 listening on http://localhost:" + port));

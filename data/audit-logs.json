@@ -1,0 +1,448 @@
+{
+  "logs": [
+    {
+      "id": "AUD-1782101177796-uy1u7b",
+      "action": "backup.create",
+      "timestamp": "2026-06-22T04:06:17.796Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "backup",
+        "id": "BK-1782101177794-p8ul",
+        "name": "管理员测试备份"
+      },
+      "detail": {
+        "id": "BK-1782101177794-p8ul",
+        "version": "1.0.0",
+        "createdAt": "2026-06-22T04:06:17.794Z",
+        "remark": "管理员测试备份",
+        "operator": "system",
+        "modelCount": 14,
+        "taskCount": 50
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101177790-h3dvgx",
+      "action": "task.status_change",
+      "timestamp": "2026-06-22T04:06:17.790Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782101177788-3l",
+        "name": "测试位置索具"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "调整中",
+        "modelId": "MR-1782101177783-4i5b",
+        "taskId": "T-1782101177788-3l",
+        "taskPosition": "测试位置索具"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101177789-ud1zbr",
+      "action": "task.create",
+      "timestamp": "2026-06-22T04:06:17.789Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782101177788-3l",
+        "name": "测试位置索具"
+      },
+      "detail": {
+        "modelId": "MR-1782101177783-4i5b",
+        "modelCode": "MR-TEST-1782101177781",
+        "position": "测试位置索具",
+        "tension": "正常",
+        "note": "测试任务创建"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101177788-66s8zf",
+      "action": "model.note_add",
+      "timestamp": "2026-06-22T04:06:17.788Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782101177783-4i5b",
+        "name": "MR-TEST-1782101177781"
+      },
+      "detail": {
+        "step": "备注",
+        "note": "这是一条测试备注"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101177785-stjgby",
+      "action": "model.status_change",
+      "timestamp": "2026-06-22T04:06:17.785Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782101177783-4i5b",
+        "name": "MR-TEST-1782101177781"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "校准中"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101177783-agiuoa",
+      "action": "model.create",
+      "timestamp": "2026-06-22T04:06:17.783Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782101177783-4i5b",
+        "name": "MR-TEST-1782101177781"
+      },
+      "detail": {
+        "code": "MR-TEST-1782101177781",
+        "shipType": "测试船",
+        "owner": "周宁",
+        "dueDate": "2026-12-31"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101177774-330kxx",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T04:06:17.774Z",
+      "actor": null,
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": false,
+        "reason": "wrong_password"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101177772-75g21o",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T04:06:17.772Z",
+      "actor": {
+        "username": "zhangsan",
+        "displayName": "张三",
+        "role": "user",
+        "owner": "张三"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhangsan",
+        "name": "张三"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101177771-g33jfo",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T04:06:17.771Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhouning",
+        "name": "周宁"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101177765-wd8xuh",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T04:06:17.765Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101084191-c2x6uq",
+      "action": "task.status_change",
+      "timestamp": "2026-06-22T04:04:44.191Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782101084187-nq",
+        "name": "测试位置索具"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "调整中",
+        "modelId": "MR-1782101084157-z9uh",
+        "taskId": "T-1782101084187-nq",
+        "taskPosition": "测试位置索具"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101084188-eud2lz",
+      "action": "task.create",
+      "timestamp": "2026-06-22T04:04:44.188Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782101084187-nq",
+        "name": "测试位置索具"
+      },
+      "detail": {
+        "modelId": "MR-1782101084157-z9uh",
+        "modelCode": "MR-TEST-1782101084155",
+        "position": "测试位置索具",
+        "tension": "正常",
+        "note": "测试任务创建"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101084185-bui3zl",
+      "action": "model.note_add",
+      "timestamp": "2026-06-22T04:04:44.185Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782101084157-z9uh",
+        "name": "MR-TEST-1782101084155"
+      },
+      "detail": {
+        "step": "备注",
+        "note": "这是一条测试备注"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101084175-b3wm19",
+      "action": "model.status_change",
+      "timestamp": "2026-06-22T04:04:44.175Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782101084157-z9uh",
+        "name": "MR-TEST-1782101084155"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "校准中"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101084164-tseize",
+      "action": "model.create",
+      "timestamp": "2026-06-22T04:04:44.164Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782101084157-z9uh",
+        "name": "MR-TEST-1782101084155"
+      },
+      "detail": {
+        "code": "MR-TEST-1782101084155",
+        "shipType": "测试船",
+        "owner": "周宁",
+        "dueDate": "2026-12-31"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101084109-78waga",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T04:04:44.109Z",
+      "actor": null,
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": false,
+        "reason": "wrong_password"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101084107-fi1q7l",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T04:04:44.107Z",
+      "actor": {
+        "username": "zhangsan",
+        "displayName": "张三",
+        "role": "user",
+        "owner": "张三"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhangsan",
+        "name": "张三"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101084104-5okdri",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T04:04:44.104Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhouning",
+        "name": "周宁"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782101084081-8p4s65",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T04:04:44.081Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782099981017-wlqnj9",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T03:46:21.017Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782099053363-aeuv2x",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T03:30:53.363Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    }
+  ]
+}
