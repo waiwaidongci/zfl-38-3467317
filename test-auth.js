@@ -77,7 +77,8 @@ async function main() {
   // 4. 服务端路由鉴权 - 普通用户访问审计页被拒绝
   console.log("【4】服务端路由鉴权 - 普通用户越权被拒");
   const userAudit = await api("GET", "/audit", zhouToken);
-  assert(userAudit.status === 403, `周宁访问审计页返回403 (返回${userAudit.status})`);
+  assert(userAudit.status === 302, `周宁访问审计页返回302重定向 (返回${userAudit.status})`);
+  assert(userAudit.headers.location === "/?error=forbidden_admin_required", `周宁访问审计页重定向到权限提示页: ${userAudit.headers.location}`);
   console.log();
 
   // 5. 已登录用户访问登录页自动重定向
@@ -171,7 +172,7 @@ async function main() {
   const loginPageRes = await api("GET", "/login", null);
   const loginHtml = typeof loginPageRes.data === 'string' ? loginPageRes.data : JSON.stringify(loginPageRes.data);
   assert(loginHtml.includes("existingToken"), "登录页包含已登录检测逻辑");
-  assert(loginHtml.includes("document.cookie = 'auth_token='"), "登录页包含Cookie设置逻辑");
+  assert(loginHtml.includes("isSafeRedirect"), "登录页包含安全跳转校验逻辑");
   console.log();
 
   // 12. 导入页面认证保护
