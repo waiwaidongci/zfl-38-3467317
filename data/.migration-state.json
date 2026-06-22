@@ -1,0 +1,56 @@
+{
+  "history": [
+    {
+      "type": "migration",
+      "fromVersion": 0,
+      "toVersion": 2,
+      "at": "2026-06-22T06:42:10.031Z",
+      "appliedMigrations": [
+        {
+          "from": 0,
+          "to": 1,
+          "name": "初始化结构规范化迁移",
+          "at": "2026-06-22T06:42:10.028Z",
+          "stats": {
+            "totalItems": 16,
+            "addedId": 0,
+            "addedCreatedAt": 4,
+            "addedOwner": 0,
+            "addedStatus": 0,
+            "addedTasksField": 0,
+            "addedLogsField": 0,
+            "normalizedTaskStatus": 0,
+            "normalizedModelStatus": 0,
+            "addedTaskLogs": 0,
+            "addedTaskId": 0,
+            "addedTaskTension": 0,
+            "addedTaskStatus": 0,
+            "auditTrailEntries": 0
+          },
+          "preSnapshotId": "SNAP-MIGRATION-STEP-1782110530028-i6rv"
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "name": "审计数据与校准库结构化迁移",
+          "at": "2026-06-22T06:42:10.029Z",
+          "stats": {
+            "totalItems": 16,
+            "auditRecordsUpgraded": 0,
+            "calibrationRulesSeeded": 4,
+            "taskReferenceLinksAdded": 52,
+            "itemAuditRefAdded": 16,
+            "itemsWithDataHash": 0,
+            "systemConfigAdded": 1
+          },
+          "preSnapshotId": "SNAP-MIGRATION-STEP-1782110530029-k29y"
+        }
+      ],
+      "preSnapshotId": "SNAP-PRE-MIGRATION-1782110530027-jig4",
+      "postSnapshotId": "SNAP-POST-MIGRATION-1782110530030-vebu"
+    }
+  ],
+  "currentVersion": 2,
+  "lastMigrationAt": "2026-06-22T06:42:10.031Z",
+  "failedAttempts": []
+}

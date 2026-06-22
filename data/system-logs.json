@@ -1,6 +1,14 @@
 {
   "logs": [
     {
+      "id": "LOG-1782111920387-g34h",
+      "type": "backup_create",
+      "action": "创建备份",
+      "detail": "创建备份 BK-1782111920386-i8qt，包含 20 个模型，56 个任务。备注：管理员测试备份",
+      "operator": "system",
+      "at": "2026-06-22T07:05:20.387Z"
+    },
+    {
       "id": "LOG-1782106144625-yz5i",
       "type": "backup_create",
       "action": "创建备份",

@@ -1,6 +1,843 @@
 {
   "logs": [
     {
+      "id": "AUD-1782112276332-dy815o",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:11:16.332Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782112233635-v6ibep",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:10:33.635Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhouning",
+        "name": "周宁"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782112233623-d1x0iv",
+      "action": "task.status_change",
+      "timestamp": "2026-06-22T07:10:33.623Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782112233621-ng",
+        "name": "冒烟测试索具"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "调整中",
+        "modelId": "MR-1782112233614-2pko",
+        "taskId": "T-1782112233621-ng",
+        "taskPosition": "冒烟测试索具"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782112233622-tcd8gs",
+      "action": "task.create",
+      "timestamp": "2026-06-22T07:10:33.622Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782112233621-ng",
+        "name": "冒烟测试索具"
+      },
+      "detail": {
+        "modelId": "MR-1782112233614-2pko",
+        "modelCode": "MR-SMOKE-1782112233",
+        "position": "冒烟测试索具",
+        "tension": "偏松",
+        "note": "冒烟测试任务"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782112233616-sz5qw2",
+      "action": "model.create",
+      "timestamp": "2026-06-22T07:10:33.616Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782112233614-2pko",
+        "name": "MR-SMOKE-1782112233"
+      },
+      "detail": {
+        "code": "MR-SMOKE-1782112233",
+        "shipType": "冒烟测试船",
+        "owner": "周宁",
+        "dueDate": "2026-12-31"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782112233597-id4fmx",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:10:33.597Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111928874-bsemz4",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:28.874Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111928869-ktigcw",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:28.869Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhouning",
+        "name": "周宁"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111928801-st0pvu",
+      "action": "auth.logout",
+      "timestamp": "2026-06-22T07:05:28.801Z",
+      "actor": {
+        "username": "lisi",
+        "displayName": "李四",
+        "role": "user",
+        "owner": "李四"
+      },
+      "target": {
+        "type": "user",
+        "id": "lisi",
+        "name": "李四"
+      },
+      "detail": {},
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111928799-j1t1ho",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:28.799Z",
+      "actor": {
+        "username": "lisi",
+        "displayName": "李四",
+        "role": "user",
+        "owner": "李四"
+      },
+      "target": {
+        "type": "user",
+        "id": "lisi",
+        "name": "李四"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111928786-hkf1ot",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:28.786Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhouning",
+        "name": "周宁"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111928781-uees79",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:28.781Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920388-xu10mn",
+      "action": "backup.create",
+      "timestamp": "2026-06-22T07:05:20.388Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "backup",
+        "id": "BK-1782111920386-i8qt",
+        "name": "管理员测试备份"
+      },
+      "detail": {
+        "id": "BK-1782111920386-i8qt",
+        "version": "1.0.0",
+        "createdAt": "2026-06-22T07:05:20.386Z",
+        "remark": "管理员测试备份",
+        "operator": "system",
+        "modelCount": 20,
+        "taskCount": 56
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920379-j94otj",
+      "action": "task.status_change",
+      "timestamp": "2026-06-22T07:05:20.379Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782111920377-wg",
+        "name": "测试位置索具"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "调整中",
+        "modelId": "MR-1782111920367-7ryp",
+        "taskId": "T-1782111920377-wg",
+        "taskPosition": "测试位置索具"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920378-69pgf8",
+      "action": "task.create",
+      "timestamp": "2026-06-22T07:05:20.378Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782111920377-wg",
+        "name": "测试位置索具"
+      },
+      "detail": {
+        "modelId": "MR-1782111920367-7ryp",
+        "modelCode": "MR-TEST-1782111920366",
+        "position": "测试位置索具",
+        "tension": "正常",
+        "note": "测试任务创建"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920375-ahgat1",
+      "action": "model.note_add",
+      "timestamp": "2026-06-22T07:05:20.375Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782111920367-7ryp",
+        "name": "MR-TEST-1782111920366"
+      },
+      "detail": {
+        "step": "备注",
+        "note": "这是一条测试备注"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920372-uk5ljx",
+      "action": "model.status_change",
+      "timestamp": "2026-06-22T07:05:20.372Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782111920367-7ryp",
+        "name": "MR-TEST-1782111920366"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "校准中"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920368-sz01ve",
+      "action": "model.create",
+      "timestamp": "2026-06-22T07:05:20.368Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782111920367-7ryp",
+        "name": "MR-TEST-1782111920366"
+      },
+      "detail": {
+        "code": "MR-TEST-1782111920366",
+        "shipType": "测试船",
+        "owner": "周宁",
+        "dueDate": "2026-12-31"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920359-l6zjru",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:20.359Z",
+      "actor": null,
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": false,
+        "reason": "wrong_password"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920357-mzf96z",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:20.357Z",
+      "actor": {
+        "username": "zhangsan",
+        "displayName": "张三",
+        "role": "user",
+        "owner": "张三"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhangsan",
+        "name": "张三"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920355-9hhx0y",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:20.355Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhouning",
+        "name": "周宁"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111920349-90jxy0",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:20.350Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111908920-8jfnn6",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:08.920Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhouning",
+        "name": "周宁"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111908911-n525ce",
+      "action": "task.status_change",
+      "timestamp": "2026-06-22T07:05:08.911Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782111908906-cn",
+        "name": "冒烟测试索具"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "调整中",
+        "modelId": "MR-1782111908901-nrkf",
+        "taskId": "T-1782111908906-cn",
+        "taskPosition": "冒烟测试索具"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111908907-t20qfr",
+      "action": "task.create",
+      "timestamp": "2026-06-22T07:05:08.907Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782111908906-cn",
+        "name": "冒烟测试索具"
+      },
+      "detail": {
+        "modelId": "MR-1782111908901-nrkf",
+        "modelCode": "MR-SMOKE-1782111908",
+        "position": "冒烟测试索具",
+        "tension": "偏松",
+        "note": "冒烟测试任务"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111908902-nkmgnm",
+      "action": "model.create",
+      "timestamp": "2026-06-22T07:05:08.902Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782111908901-nrkf",
+        "name": "MR-SMOKE-1782111908"
+      },
+      "detail": {
+        "code": "MR-SMOKE-1782111908",
+        "shipType": "冒烟测试船",
+        "owner": "周宁",
+        "dueDate": "2026-12-31"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111908889-xu6n7g",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:05:08.889Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111757143-ytsgqc",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:02:37.143Z",
+      "actor": {
+        "username": "zhouning",
+        "displayName": "周宁",
+        "role": "user",
+        "owner": "周宁"
+      },
+      "target": {
+        "type": "user",
+        "id": "zhouning",
+        "name": "周宁"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111757132-3if0p6",
+      "action": "task.status_change",
+      "timestamp": "2026-06-22T07:02:37.132Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782111757129-2w",
+        "name": "冒烟测试索具"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "调整中",
+        "modelId": "MR-1782111757127-nmo2",
+        "taskId": "T-1782111757129-2w",
+        "taskPosition": "冒烟测试索具"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111757130-iec6x1",
+      "action": "task.create",
+      "timestamp": "2026-06-22T07:02:37.130Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782111757129-2w",
+        "name": "冒烟测试索具"
+      },
+      "detail": {
+        "modelId": "MR-1782111757127-nmo2",
+        "modelCode": "MR-SMOKE-1782111757",
+        "position": "冒烟测试索具",
+        "tension": "偏松",
+        "note": "冒烟测试任务"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111757127-d381kq",
+      "action": "model.create",
+      "timestamp": "2026-06-22T07:02:37.127Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782111757127-nmo2",
+        "name": "MR-SMOKE-1782111757"
+      },
+      "detail": {
+        "code": "MR-SMOKE-1782111757",
+        "shipType": "冒烟测试船",
+        "owner": "周宁",
+        "dueDate": "2026-12-31"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111757114-310nul",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:02:37.114Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111715256-pf0igy",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:01:55.256Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111672926-jltrsp",
+      "action": "task.status_change",
+      "timestamp": "2026-06-22T07:01:12.926Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782111672924-yj",
+        "name": "冒烟测试索具"
+      },
+      "detail": {
+        "oldStatus": "待检查",
+        "newStatus": "调整中",
+        "modelId": "MR-1782111672920-tz9s",
+        "taskId": "T-1782111672924-yj",
+        "taskPosition": "冒烟测试索具"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111672924-5ibu0u",
+      "action": "task.create",
+      "timestamp": "2026-06-22T07:01:12.924Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "task",
+        "id": "T-1782111672924-yj",
+        "name": "冒烟测试索具"
+      },
+      "detail": {
+        "modelId": "MR-1782111672920-tz9s",
+        "modelCode": "MR-SMOKE-1782111672",
+        "position": "冒烟测试索具",
+        "tension": "偏松",
+        "note": "冒烟测试任务"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111672921-a9f1i3",
+      "action": "model.create",
+      "timestamp": "2026-06-22T07:01:12.921Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "model",
+        "id": "MR-1782111672920-tz9s",
+        "name": "MR-SMOKE-1782111672"
+      },
+      "detail": {
+        "code": "MR-SMOKE-1782111672",
+        "shipType": "冒烟测试船",
+        "owner": "周宁",
+        "dueDate": "2026-12-31"
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782111672909-27rneb",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T07:01:12.909Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782110646094-ym4aj2",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T06:44:06.094Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
+      "id": "AUD-1782110558312-4f0ahk",
+      "action": "auth.login",
+      "timestamp": "2026-06-22T06:42:38.312Z",
+      "actor": {
+        "username": "admin",
+        "displayName": "系统管理员",
+        "role": "admin",
+        "owner": null
+      },
+      "target": {
+        "type": "user",
+        "id": "admin",
+        "name": "系统管理员"
+      },
+      "detail": {
+        "success": true
+      },
+      "ip": "::1"
+    },
+    {
       "id": "AUD-1782106560983-j5lfo9",
       "action": "auth.login",
       "timestamp": "2026-06-22T05:36:00.983Z",
