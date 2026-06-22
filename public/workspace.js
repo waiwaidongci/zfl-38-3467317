@@ -6,10 +6,22 @@ var wsCurrentWorkspace = null;
 var wsInitializing = false;
 
 async function wsApi(path, options) {
-  var requestOptions = options && options.body && !(options.body instanceof FormData)
-    ? { ...options, headers: { 'Content-Type': 'application/json' } }
-    : options;
-  var res = await fetch(path, requestOptions);
+  var token = localStorage.getItem('auth_token');
+  var reqOptions = options || {};
+  if (!reqOptions.headers) reqOptions.headers = {};
+  if (token && typeof reqOptions.headers === 'object' && !(reqOptions.headers instanceof Headers)) {
+    reqOptions.headers['Authorization'] = 'Bearer ' + token;
+  }
+  if (reqOptions.body && !(reqOptions.body instanceof FormData)) {
+    reqOptions.headers['Content-Type'] = 'application/json';
+  }
+  var res = await fetch(path, reqOptions);
+  if (res.status === 401) {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+    window.location.href = '/login?redirect=' + encodeURIComponent(location.pathname + location.search);
+    throw new Error('unauthorized');
+  }
   var data = await res.json();
   if (!res.ok) throw new Error(data.error || '请求失败');
   return data;
@@ -342,6 +354,7 @@ async function refreshWorkspace() {
 }
 
 window.initWorkspace = initWorkspace;
+window.wsLoadOwnerList = wsLoadOwnerList;
 window.refreshWorkspace = refreshWorkspace;
 window.wsShowOwnerList = wsShowOwnerList;
 window.wsShowWorkspace = wsShowWorkspace;

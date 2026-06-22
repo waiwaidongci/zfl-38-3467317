@@ -1,6 +1,22 @@
 {
   "logs": [
     {
+      "id": "LOG-1782106144625-yz5i",
+      "type": "backup_create",
+      "action": "创建备份",
+      "detail": "创建备份 BK-1782106144624-ei6m，包含 16 个模型，52 个任务。备注：管理员测试备份",
+      "operator": "system",
+      "at": "2026-06-22T05:29:04.625Z"
+    },
+    {
+      "id": "LOG-1782104668713-e6ly",
+      "type": "backup_create",
+      "action": "创建备份",
+      "detail": "创建备份 BK-1782104668712-5yf8，包含 15 个模型，51 个任务。备注：管理员测试备份",
+      "operator": "system",
+      "at": "2026-06-22T05:04:28.713Z"
+    },
+    {
       "id": "LOG-1782101177795-qw1h",
       "type": "backup_create",
       "action": "创建备份",

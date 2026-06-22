@@ -268,6 +268,56 @@ function loginPageHtml() {
     </div>
   </div>
   <script>
+    function isSafeRedirect(target) {
+      if (!target || typeof target !== 'string') return false;
+      if (!target.startsWith('/')) return false;
+      if (target.startsWith('//')) return false;
+      var normalized;
+      try { normalized = decodeURIComponent(target); } catch (e) { normalized = target; }
+      var lower = normalized.toLowerCase();
+      if (lower.indexOf('http:') === 0 || lower.indexOf('https:') === 0 || lower.indexOf('ftp:') === 0 ||
+          lower.indexOf('javascript:') === 0 || lower.indexOf('data:') === 0 || lower.indexOf('vbscript:') === 0) {
+        return false;
+      }
+      if (normalized.indexOf('<') !== -1 || normalized.indexOf('>') !== -1) return false;
+      return true;
+    }
+    
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      var redirectTarget = params.get('redirect') || '';
+      var loginError = params.get('error') || '';
+      if (loginError) {
+        var err = document.getElementById('errorMsg');
+        if (err) {
+          err.textContent = loginError === 'forbidden_admin_required' ? '无权限访问该页面' : decodeURIComponent(loginError);
+          err.style.display = 'block';
+        }
+      }
+    })();
+    
+    const existingToken = localStorage.getItem('auth_token');
+    if (existingToken) {
+      fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + existingToken } })
+        .then(function(res) {
+          if (res.ok) {
+            res.json().then(function(userData) {
+              var params = new URLSearchParams(window.location.search);
+              var redirectTarget = params.get('redirect');
+              if (isSafeRedirect(redirectTarget)) {
+                window.location.href = redirectTarget;
+              } else if (userData.role === 'admin') {
+                window.location.href = '/';
+              } else if (userData.owner) {
+                window.location.href = '/workspace/' + encodeURIComponent(userData.owner);
+              } else {
+                window.location.href = '/';
+              }
+            }).catch(function() { window.location.href = '/'; });
+          }
+        }).catch(function() {});
+    }
+    
     const form = document.getElementById('loginForm');
     const btn = document.getElementById('loginBtn');
     const errorMsg = document.getElementById('errorMsg');
@@ -294,7 +344,17 @@ function loginPageHtml() {
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem('auth_user', JSON.stringify(data.user));
         
-        window.location.href = '/';
+        var params = new URLSearchParams(window.location.search);
+        var redirectTarget = params.get('redirect');
+        if (isSafeRedirect(redirectTarget)) {
+          window.location.href = redirectTarget;
+        } else if (data.user.role === 'admin') {
+          window.location.href = '/';
+        } else if (data.user.owner) {
+          window.location.href = '/workspace/' + encodeURIComponent(data.user.owner);
+        } else {
+          window.location.href = '/';
+        }
       } catch (err) {
         const msgMap = {
           user_not_found: '用户名不存在',
@@ -416,7 +476,53 @@ function auditPageHtml() {
     let authUser = null;
     try { authUser = JSON.parse(localStorage.getItem('auth_user') || 'null'); } catch(e) {}
     
-    if (!authToken) { window.location.href = '/login'; }
+    if (!authToken) { window.location.href = '/login?redirect=' + encodeURIComponent(location.pathname + location.search); }
+    
+    async function validateAuditSession() {
+      if (!authToken) return false;
+      try {
+        const res = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + authToken } });
+        if (!res.ok) {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_user');
+          window.location.href = '/login?redirect=' + encodeURIComponent(location.pathname + location.search);
+          return false;
+        }
+        const data = await res.json();
+        if (data.role !== 'admin') {
+          window.location.href = '/?error=' + encodeURIComponent('forbidden_admin_required');
+          return false;
+        }
+        authUser = { username: data.username, displayName: data.displayName, role: data.role, owner: data.owner };
+        localStorage.setItem('auth_user', JSON.stringify(authUser));
+        return true;
+      } catch(e) {
+        return false;
+      }
+    }
+    
+    const originalFetch = window.fetch;
+    window.fetch = function(url, options = {}) {
+      if (authToken && !options.headers) options.headers = {};
+      if (authToken && options.headers instanceof Headers) {
+        options.headers.set('Authorization', 'Bearer ' + authToken);
+      } else if (authToken && options.headers && typeof options.headers === 'object') {
+        options.headers['Authorization'] = 'Bearer ' + authToken;
+      } else if (authToken) {
+        options.headers = { 'Authorization': 'Bearer ' + authToken };
+      }
+      return originalFetch.apply(this, arguments).then(function(response) {
+        if (response.status === 401) {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_user');
+          window.location.href = '/login?redirect=' + encodeURIComponent(location.pathname + location.search);
+        }
+        if (response.status === 403) {
+          window.location.href = '/?error=' + encodeURIComponent('forbidden_admin_required');
+        }
+        return response;
+      });
+    };
     
     let currentLogs = [];
     let currentOffset = 0;
@@ -618,6 +724,7 @@ function auditPageHtml() {
       } catch(e) {}
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth_user');
+      document.cookie = 'auth_token=; path=/; max-age=0';
       window.location.href = '/login';
     };
     document.getElementById('searchBtn').onclick = function() { currentOffset = 0; loadLogs(); };
@@ -642,9 +749,12 @@ function auditPageHtml() {
     };
     
     renderUserBadge();
-    loadStats();
-    loadFilters();
-    loadLogs();
+    validateAuditSession().then(function(valid) {
+      if (!valid) return;
+      loadStats();
+      loadFilters();
+      loadLogs();
+    });
   </script>
 </body>
 </html>`;
@@ -713,11 +823,54 @@ function mainPageHtml() {
   <script src="/public/dashboard.js"></script>
   <script src="/public/backup.js"></script>
   <script>
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      var pageError = params.get('error') || '';
+      if (pageError) {
+        var map = {
+          forbidden_admin_required: '只有管理员可以访问审计日志页面'
+        };
+        var msg = map[pageError] || decodeURIComponent(pageError);
+        if (msg) {
+          setTimeout(function() {
+            var notif = document.createElement('div');
+            notif.style.cssText = 'position:fixed;top:16px;right:16px;background:#fdf0ed;color:#9b4937;border:1px solid #f1c9bf;padding:10px 16px;border-radius:6px;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,.08);font-size:13px;';
+            notif.textContent = '⚠️ ' + msg;
+            document.body.appendChild(notif);
+            setTimeout(function() { if (notif.parentNode) notif.parentNode.removeChild(notif); }, 4000);
+          }, 400);
+          var cleanUrl = location.pathname;
+          if (window.history && window.history.replaceState) history.replaceState({}, document.title, cleanUrl);
+        }
+      }
+    })();
+    
     const authToken = localStorage.getItem('auth_token');
     let authUser = null;
     try { authUser = JSON.parse(localStorage.getItem('auth_user') || 'null'); } catch(e) {}
     
-    if (!authToken) { window.location.href = '/login'; }
+    if (!authToken) { window.location.href = '/login?redirect=' + encodeURIComponent(location.pathname + location.search); }
+    
+    async function validateSession() {
+      if (!authToken) return false;
+      try {
+        const res = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + authToken } });
+        if (!res.ok) {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_user');
+          window.location.href = '/login?redirect=' + encodeURIComponent(location.pathname + location.search);
+          return false;
+        }
+        const data = await res.json();
+        authUser = { username: data.username, displayName: data.displayName, role: data.role, owner: data.owner };
+        localStorage.setItem('auth_user', JSON.stringify(authUser));
+        window._authUser = authUser;
+        window._authToken = authToken;
+        return true;
+      } catch(e) {
+        return false;
+      }
+    }
     
     const originalFetch = window.fetch;
     window.fetch = function(url, options = {}) {
@@ -729,7 +882,14 @@ function mainPageHtml() {
       } else if (authToken) {
         options.headers = { 'Authorization': 'Bearer ' + authToken };
       }
-      return originalFetch.apply(this, arguments);
+      return originalFetch.apply(this, arguments).then(function(response) {
+        if (response.status === 401 && !url.includes('/api/auth/')) {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_user');
+          window.location.href = '/login?redirect=' + encodeURIComponent(location.pathname + location.search);
+        }
+        return response;
+      });
     };
     
     let currentView = 'list';
@@ -738,10 +898,25 @@ function mainPageHtml() {
       if (!authUser) return;
       const roleLabel = authUser.role === 'admin' ? '管理员' : '用户';
       const roleClass = authUser.role === 'admin' ? 'role-admin' : 'role-user';
+      var extraHtml = '';
+      if (authUser.role !== 'admin' && authUser.owner) {
+        extraHtml = ' <button id="myWorkspaceBtn" style="margin-left:8px;padding:2px 8px;border:1px solid var(--line);border-radius:4px;background:var(--accent);color:#fff;cursor:pointer;font-size:11px;font-weight:600;">进入我的工作区 →</button>';
+      }
       document.getElementById('userBadge').innerHTML = 
-        '👤 ' + authUser.displayName + ' <span class="role-badge ' + roleClass + '">' + roleLabel + '</span>';
+        '👤 ' + authUser.displayName + ' <span class="role-badge ' + roleClass + '">' + roleLabel + '</span>' + extraHtml;
       if (authUser.role === 'admin') {
-        document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
+        document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'inline-block');
+      }
+      var myBtn = document.getElementById('myWorkspaceBtn');
+      if (myBtn) {
+        myBtn.onclick = function() {
+          switchView('workspace');
+          setTimeout(function() {
+            if (typeof wsShowWorkspace === 'function' && authUser.owner) {
+              wsShowWorkspace(authUser.owner);
+            }
+          }, 80);
+        };
       }
     }
     
@@ -779,6 +954,7 @@ function mainPageHtml() {
       } catch(e) {}
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth_user');
+      document.cookie = 'auth_token=; path=/; max-age=0';
       window.location.href = '/login';
     };
     
@@ -787,6 +963,19 @@ function mainPageHtml() {
     window._authUser = authUser;
     window._authToken = authToken;
     
+    validateSession().then(function(valid) {
+      if (!valid) return;
+      if (typeof wsLoadOwnerList === 'function') wsLoadOwnerList();
+      var ownerFromPath = typeof wsGetOwnerFromPath === 'function' ? wsGetOwnerFromPath() : null;
+      if (ownerFromPath) {
+        switchView('workspace');
+      } else if (authUser && authUser.role !== 'admin' && authUser.owner && location.pathname === '/') {
+        switchView('list');
+      } else {
+        switchView('list');
+      }
+    });
+
     document.getElementById('viewList').innerHTML = \`
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
         <h2 style="margin:0;">📦 模型列表</h2>
@@ -891,9 +1080,6 @@ function mainPageHtml() {
       <div id="diffModal" style="display:none;"></div>
       <div id="restoreModal" style="display:none;"></div>
     \`;
-    
-    if (typeof wsInitOwnerList === 'function') wsInitOwnerList();
-    switchView('list');
   </script>
 </body>
 </html>`;
@@ -1202,26 +1388,93 @@ async function handleImportApi(req, res, db) {
   return null;
 }
 
+function encodeLocationPath(target) {
+  if (!target) return '/';
+  try {
+    var url = new URL(target, 'http://local');
+    var encoded = url.pathname.split('/').map(function(seg) {
+      if (seg === '') return '';
+      try { return encodeURIComponent(decodeURIComponent(seg)); } catch (e) { return encodeURIComponent(seg); }
+    }).join('/');
+    if (url.search) encoded += url.search;
+    if (url.hash) encoded += url.hash;
+    return encoded;
+  } catch (e) {
+    return target;
+  }
+}
+
+function isSafeRedirect(target) {
+  if (!target || typeof target !== 'string') return false;
+  if (target.length === 0) return false;
+  if (!target.startsWith('/')) return false;
+  if (target.startsWith('//')) return false;
+  var normalized;
+  try { normalized = decodeURIComponent(target); } catch (e) { normalized = target; }
+  var lower = normalized.toLowerCase();
+  if (lower.startsWith('http:') || lower.startsWith('https:') || lower.startsWith('ftp:') || 
+      lower.startsWith('javascript:') || lower.startsWith('data:') || lower.startsWith('vbscript:')) {
+    return false;
+  }
+  if (normalized.indexOf('<') !== -1 || normalized.indexOf('>') !== -1 || normalized.indexOf('"') !== -1) {
+    return false;
+  }
+  return true;
+}
+
+function getRedirectUrl(req) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const original = url.searchParams.get("redirect");
+  if (isSafeRedirect(original)) return original;
+  return null;
+}
+
+function buildLoginRedirect(targetPath) {
+  if (!targetPath || targetPath === "/login") return "/login";
+  return "/login?redirect=" + encodeURIComponent(targetPath);
+}
+
 async function handlePageRoute(req, res, pathname) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const currentFullPath = url.pathname + (url.search || "");
+
   if (pathname === "/login") {
+    if (req.auth.isAuthenticated) {
+      const redirectTarget = url.searchParams.get("redirect");
+      if (isSafeRedirect(redirectTarget)) {
+        res.writeHead(302, { Location: encodeLocationPath(redirectTarget) });
+      } else if (req.auth.isAdmin) {
+        res.writeHead(302, { Location: "/" });
+      } else {
+          if (req.auth.user?.owner) {
+            res.writeHead(302, { Location: "/workspace/" + encodeURIComponent(req.auth.user.owner) });
+          } else {
+            res.writeHead(302, { Location: "/" });
+          }
+        }
+      res.end();
+      return true;
+    }
     html(res, loginPageHtml());
     return true;
   }
   if (pathname === "/audit") {
     if (!req.auth.isAuthenticated) {
-      res.writeHead(302, { Location: "/login" });
+      res.writeHead(302, { Location: buildLoginRedirect(currentFullPath) });
       res.end();
       return true;
     }
     if (!req.auth.isAdmin) {
-      return sendError(res, 403, "forbidden_admin_required");
+      res.writeHead(302, { Location: "/?error=forbidden_admin_required" });
+      res.end();
+      return true;
     }
     html(res, auditPageHtml());
     return true;
   }
   if (pathname === "/import") {
     if (!req.auth.isAuthenticated) {
-      res.writeHead(302, { Location: "/login" });
+      res.writeHead(302, { Location: buildLoginRedirect(currentFullPath) });
       res.end();
       return true;
     }
@@ -1230,7 +1483,7 @@ async function handlePageRoute(req, res, pathname) {
   }
   if (pathname === "/" || pathname === "/index.html" || pathname.startsWith("/workspace/")) {
     if (!req.auth.isAuthenticated) {
-      res.writeHead(302, { Location: "/login" });
+      res.writeHead(302, { Location: buildLoginRedirect(currentFullPath) });
       res.end();
       return true;
     }

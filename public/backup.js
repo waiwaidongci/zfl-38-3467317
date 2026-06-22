@@ -3,7 +3,22 @@ let currentDiffBackup = null;
 let currentRestoreBackup = null;
 
 async function api(path, options) {
-  const res = await fetch(path, options && options.body ? { ...options, headers:{ 'Content-Type':'application/json' } } : options);
+  const token = localStorage.getItem('auth_token');
+  const reqOptions = options || {};
+  if (!reqOptions.headers) reqOptions.headers = {};
+  if (token && typeof reqOptions.headers === 'object' && !(reqOptions.headers instanceof Headers)) {
+    reqOptions.headers['Authorization'] = 'Bearer ' + token;
+  }
+  if (reqOptions.body && !(reqOptions.body instanceof FormData)) {
+    reqOptions.headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(path, reqOptions);
+  if (res.status === 401) {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+    window.location.href = '/login';
+    throw new Error('unauthorized');
+  }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || '请求失败');
   return data;
@@ -35,8 +50,8 @@ function renderStats() {
   const total = backups.length;
   const valid = backups.filter(b => b.valid).length;
   const invalid = total - valid;
-  const latestModelCount = backups[0]?.modelCount || 0;
-  const latestTaskCount = backups[0]?.taskCount || 0;
+  const latestModelCount = (backups[0] && backups[0].modelCount) || 0;
+  const latestTaskCount = (backups[0] && backups[0].taskCount) || 0;
 
   document.getElementById('statsSummary').innerHTML =
     '<div class="stats" style="margin:0; grid-template-columns:repeat(4,minmax(120px,1fr));">' +
@@ -147,7 +162,16 @@ async function createBackup(remark) {
 
 async function downloadBackup(backupId) {
   try {
-    const res = await fetch('/api/backups/' + encodeURIComponent(backupId) + '/download');
+    const token = localStorage.getItem('auth_token');
+    const headers = {};
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const res = await fetch('/api/backups/' + encodeURIComponent(backupId) + '/download', { headers });
+    if (res.status === 401) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      window.location.href = '/login';
+      return;
+    }
     if (!res.ok) {
       const data = await res.json();
       throw new Error(data.error || '下载失败');
@@ -245,7 +269,7 @@ function renderDiffContent(diff) {
         if (c.field === 'logs' && c.type === 'count') {
           return `日志数：${c.backup} → ${c.current}`;
         }
-        return `${c.field}：${escapeHtml(String(c.backup ?? ''))} → ${escapeHtml(String(c.current ?? ''))}`;
+        return `${c.field}：${escapeHtml(String(c.backup !== undefined && c.backup !== null ? c.backup : ''))} → ${escapeHtml(String(c.current !== undefined && c.current !== null ? c.current : ''))}`;
       }).join('；');
       html += '<tr class="row-modified">';
       html += '<td><span class="change-badge modified">修改</span></td>';

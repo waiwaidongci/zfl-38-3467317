@@ -30,10 +30,22 @@ let kanbanFilterOptions = {
 let draggedTask = null;
 
 async function api(path, options) {
-  const requestOptions = options && options.body && !(options.body instanceof FormData)
-    ? { ...options, headers: { 'Content-Type': 'application/json' } }
-    : options;
-  const res = await fetch(path, requestOptions);
+  const token = localStorage.getItem('auth_token');
+  const reqOptions = options || {};
+  if (!reqOptions.headers) reqOptions.headers = {};
+  if (token && typeof reqOptions.headers === 'object' && !(reqOptions.headers instanceof Headers)) {
+    reqOptions.headers['Authorization'] = 'Bearer ' + token;
+  }
+  if (reqOptions.body && !(reqOptions.body instanceof FormData)) {
+    reqOptions.headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(path, reqOptions);
+  if (res.status === 401) {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+    window.location.href = '/login';
+    throw new Error('unauthorized');
+  }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || '请求失败');
   return data;
