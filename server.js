@@ -250,6 +250,9 @@ function page() {
       <div class="stats" id="stats"></div>
       <div class="toolbar">
         <select id="statusFilter"><option value="">全部状态</option>${stages.map(s => '<option>'+s+'</option>').join('')}</select>
+        <select id="ownerFilter"><option value="">全部负责人</option></select>
+        <select id="shipTypeFilter"><option value="">全部船型</option></select>
+        <select id="riggingMaterialFilter"><option value="">全部帆索材料</option></select>
         <input id="search" placeholder="搜索编号或关键词">
       </div>
       <div class="panel"><h2>创建模型后可拆分帆索任务，逐条记录松紧状态、调整备注和完成时间。</h2><div class="grid" id="cards"></div></div>
@@ -355,13 +358,32 @@ function page() {
       return '<article class="card"><h3>'+(item.code || item.id)+'</h3><span class="pill">'+item.status+'</span>'+main+ownerHtml+dueHtml+tasks+'<label>状态</label><select data-status="'+(item.id || item.code)+'">'+stages.map(s => '<option '+(s===item.status?'selected':'')+'>'+s+'</option>').join('')+'</select><button class="secondary" data-note="'+(item.id || item.code)+'">追加备注</button><div class="logs meta">'+(logs || '暂无记录')+'</div></article>';
     }
 
+    function renderFilterOptions() {
+      const ownerSet = [...new Set(items.map(i => i.owner).filter(Boolean))].sort();
+      const shipTypeSet = [...new Set(items.map(i => i.shipType).filter(Boolean))].sort();
+      const riggingMaterialSet = [...new Set(items.map(i => i.riggingMaterial).filter(Boolean))].sort();
+      const ownerFilter = document.querySelector('#ownerFilter');
+      const shipTypeFilter = document.querySelector('#shipTypeFilter');
+      const riggingMaterialFilter = document.querySelector('#riggingMaterialFilter');
+      const curOwner = ownerFilter.value;
+      const curShip = shipTypeFilter.value;
+      const curMat = riggingMaterialFilter.value;
+      ownerFilter.innerHTML = '<option value="">全部负责人</option>' + ownerSet.map(o => '<option value="'+o+'"'+(o===curOwner?' selected':'')+'>'+o+'</option>').join('');
+      shipTypeFilter.innerHTML = '<option value="">全部船型</option>' + shipTypeSet.map(s => '<option value="'+s+'"'+(s===curShip?' selected':'')+'>'+s+'</option>').join('');
+      riggingMaterialFilter.innerHTML = '<option value="">全部帆索材料</option>' + riggingMaterialSet.map(m => '<option value="'+m+'"'+(m===curMat?' selected':'')+'>'+m+'</option>').join('');
+    }
+
     function renderList() {
-      itemSelect.innerHTML = items.map(item => '<option value="'+(item.id || item.code)+'">'+(item.code || item.id)+' · '+(item.name || item.shipType || item.source || item.plateSize || '')+'</option>').join('');
-      const stats = Object.fromEntries(stages.map(s => [s, items.filter(i => i.status === s).length]));
-      statsEl.innerHTML = Object.entries(stats).map(([k,v]) => '<div class="stat"><span>'+k+'</span><strong>'+v+'</strong></div>').join('');
+      renderFilterOptions();
       const status = document.querySelector('#statusFilter').value;
+      const owner = document.querySelector('#ownerFilter').value;
+      const shipType = document.querySelector('#shipTypeFilter').value;
+      const riggingMaterial = document.querySelector('#riggingMaterialFilter').value;
       const q = document.querySelector('#search').value.trim();
-      const visible = items.filter(item => (!status || item.status === status) && (!q || JSON.stringify(item).includes(q)));
+      const visible = items.filter(item => (!status || item.status === status) && (!owner || item.owner === owner) && (!shipType || item.shipType === shipType) && (!riggingMaterial || item.riggingMaterial === riggingMaterial) && (!q || JSON.stringify(item).includes(q)));
+      itemSelect.innerHTML = visible.map(item => '<option value="'+(item.id || item.code)+'">'+(item.code || item.id)+' · '+(item.name || item.shipType || item.source || item.plateSize || '')+'</option>').join('');
+      const stats = Object.fromEntries(stages.map(s => [s, visible.filter(i => i.status === s).length]));
+      statsEl.innerHTML = Object.entries(stats).map(([k,v]) => '<div class="stat"><span>'+k+'</span><strong>'+v+'</strong></div>').join('');
       if (visible.length === 0) {
         cards.innerHTML = emptyHtml('📋', '暂无模型', '请创建模型或调整筛选条件');
       } else {
@@ -516,6 +538,9 @@ function page() {
     createForm.onsubmit = async event => { event.preventDefault(); await api('/api/items', { method:'POST', body: JSON.stringify(Object.fromEntries(new FormData(createForm).entries())) }); createForm.reset(); await refreshAll(); };
     actionForm.onsubmit = async event => { event.preventDefault(); await api('/api/items/'+itemSelect.value+'/action', { method:'POST', body: JSON.stringify(Object.fromEntries(new FormData(actionForm).entries())) }); actionForm.reset(); await refreshAll(); };
     document.querySelector('#statusFilter').onchange = render;
+    document.querySelector('#ownerFilter').onchange = render;
+    document.querySelector('#shipTypeFilter').onchange = render;
+    document.querySelector('#riggingMaterialFilter').onchange = render;
     document.querySelector('#search').oninput = render;
     document.querySelector('#reload').onclick = refreshAll;
     document.querySelector('#importBtn').onclick = () => { location.href = '/import'; };
