@@ -1,25 +1,6 @@
 {
   "items": [
     {
-      "id": "MR-1782092830062",
-      "code": "MR-TEST-DIFF",
-      "shipType": "差异测试船",
-      "scale": "1:200",
-      "mastCount": 1,
-      "riggingMaterial": "测试索具",
-      "owner": "测试员",
-      "dueDate": "2026-12-31",
-      "status": "待检查",
-      "logs": [
-        {
-          "at": "2026-06-22T01:47:10.062Z",
-          "step": "建档",
-          "note": "创建模型"
-        }
-      ],
-      "tasks": []
-    },
-    {
       "id": "MR-1782027262570-w5rn",
       "code": "MR-204",
       "shipType": "鸟船",
